@@ -20,11 +20,18 @@ pipeline {
                         credentialsId: "github-pat"
                     )
 
-                    // Build avec Maven
-                    buildProject(
-                        buildTool: 'maven',
-                        args: "-Pprod -Dspring.profiles.active=prod"
-                    )
+                    // Injecter les variables dans le contexte Spring
+                    withEnv([
+                        "SPRING_DATASOURCE_URL=${env.DB_URL}",
+                        "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
+                        "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
+                    ]) {
+                        // Build avec Maven
+                        buildProject(
+                            buildTool: 'maven',
+                            args: "-Pprod -Dspring.profiles.active=prod"
+                        )
+                    }
 
                     // Build et push Docker
                     dockerBuildFullImage(
@@ -37,4 +44,5 @@ pipeline {
         }
     }
 }
+
 
