@@ -13,36 +13,41 @@ pipeline {
         stage('Build et Déploiement') {
             steps {
                 script {
-                    // Clonage du dépôt
+                    // Cloner le dépôt
                     cloneRepo(
                         repoUrl: "https://github.com/Ferdali10/projectSpring.git",
                         branch: "master",
                         credentialsId: "github-pat"
                     )
 
-                    // Injecter les variables dans le contexte Spring
+                    // Injecter variables dans l'environnement Maven/Spring
                     withEnv([
                         "SPRING_DATASOURCE_URL=${env.DB_URL}",
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
-                        // Build avec Maven
+                        // Build Maven
                         buildProject(
                             buildTool: 'maven',
-                            args: "-Pprod -Dspring.profiles.active=prod"
+                            args: "-Dspring.profiles.active=prod"
                         )
                     }
 
-                    // Build et push Docker
+                    // Récupérer dynamiquement le .jar généré
+                    def jarFile = sh(script: "ls target/*.jar", returnStdout: true).trim()
+                    echo "Le fichier JAR généré est : ${jarFile}"
+
+                    // Build et push Docker avec le .jar exact
                     dockerBuildFullImage(
                         imageName: "dalifer/springfoyer",
                         tags: ["latest", "${env.BUILD_NUMBER}"],
-                        buildArgs: "--build-arg JAR_FILE=target/*.jar"
+                        buildArgs: "--build-arg JAR_FILE=${jarFile}"
                     )
                 }
             }
         }
     }
 }
+
 
 
