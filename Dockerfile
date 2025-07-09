@@ -11,10 +11,10 @@ FROM eclipse-temurin:17-jre-jammy
 WORKDIR /app
 
 # Argument pour passer le JAR à copier depuis l'étape build
-ARG JAR_FILE=target/*.jar
+ARG JAR_FILE=springFoyer-0.0.2-SNAPSHOT.jar
 
 # Copier le JAR depuis l'image build, en utilisant l'argument
-COPY --from=build /app/${JAR_FILE} app.jar
+COPY --from=build /app/target/${JAR_FILE} app.jar
 
 # Variables d'environnement pour la config Spring
 ENV SPRING_DATASOURCE_URL=${DB_URL} \
@@ -24,4 +24,5 @@ ENV SPRING_DATASOURCE_URL=${DB_URL} \
 EXPOSE 8081
 
 ENTRYPOINT ["java", "-jar", "app.jar"]
+
 
