@@ -25,7 +25,7 @@ pipeline {
 
                     // 3. Build et Push Docker
                     dockerBuildFullImage(
-                        imageName: "votredockerhub/springfoyer",
+                        imageName: "dalifer/springfoyer",
                         tags: ["latest", "${env.BUILD_NUMBER}"],
                         buildArgs: "--build-arg JAR_FILE=target/*.jar"
                     )
