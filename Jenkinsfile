@@ -30,22 +30,28 @@ pipeline {
                         )
                     }
 
-                    // Correction ici : guillemets simples pour la commande shell avec $()
-                    def jarFile = sh(script: 'basename $(ls target/*.jar)', returnStdout: true).trim()
-                    echo "Fichier JAR généré : ${jarFile}"
+                    // Récupérer le chemin complet du jar
+                    def jarPath = sh(script: 'ls target/*.jar | head -n 1', returnStdout: true).trim()
+                    echo "Chemin du JAR généré : ${jarPath}"
 
-                    if (!fileExists(jarFile)) {
-                        error "Le fichier JAR ${jarFile} est introuvable"
+                    // Vérifier que le fichier existe
+                    if (!fileExists(jarPath)) {
+                        error "Le fichier JAR ${jarPath} est introuvable"
                     }
+
+                    // Extraire juste le nom du fichier
+                    def jarFileName = jarPath.tokenize('/').last()
+                    echo "Nom du JAR à injecter dans Docker : ${jarFileName}"
 
                     dockerBuildFullImage(
                         imageName: "dalifer/springfoyer",
                         tags: ["latest", "${env.BUILD_NUMBER}"],
-                        buildArgs: "--build-arg JAR_FILE=${jarFile}"
+                        buildArgs: "--build-arg JAR_FILE=${jarFileName}"
                     )
                 }
             }
         }
     }
 }
+
 
