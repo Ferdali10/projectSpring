@@ -30,17 +30,21 @@ pipeline {
                         )
                     }
 
-                    // Récupérer le chemin du jar
+                    // 💥 Ajout de debug pour afficher le contenu de target/
+                    sh 'pwd'
+                    sh 'ls -la target'
+
+                    // Récupération du jar
                     def jarPath = sh(script: 'ls target/*.jar | head -n 1', returnStdout: true).trim()
                     echo "Chemin du JAR généré : ${jarPath}"
 
-                    // Vérification avec shell plutôt que fileExists
+                    // Vérification avec shell
                     def exists = sh(script: "[ -f '${jarPath}' ] && echo exists || echo missing", returnStdout: true).trim()
                     if (exists != "exists") {
                         error "Le fichier JAR ${jarPath} est introuvable (vérifié par shell)"
                     }
 
-                    // Extraire le nom du fichier pour Docker
+                    // Nom du jar
                     def jarFileName = jarPath.tokenize('/').last()
                     echo "Nom du JAR à injecter dans Docker : ${jarFileName}"
 
@@ -54,6 +58,7 @@ pipeline {
         }
     }
 }
+
 
 
 
