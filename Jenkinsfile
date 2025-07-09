@@ -11,10 +11,11 @@ pipeline {
         stage('Build et Déploiement') {
             steps {
                 script {
-                    // 1. Clone (optionnel si Jenkins fait déjà le checkout)
+                    // 1. Clone (avec credentials ajoutés)
                     cloneRepo(
                         repoUrl: "https://github.com/Ferdali10/springFoyer.git",
-                        branch: "master"
+                        branch: "master",
+                        credentialsId: "github-pat"
                     )
 
                     // 2. Build avec Maven
@@ -34,4 +35,5 @@ pipeline {
         }
     }
 }
+
 
