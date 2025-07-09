@@ -3,7 +3,6 @@
 pipeline {
     agent any
     environment {
-        environment {
         DB_URL = 'jdbc:mysql://192.168.11.100:3306/springfoyer'
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
@@ -35,3 +34,4 @@ pipeline {
         }
     }
 }
+
