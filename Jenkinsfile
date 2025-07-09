@@ -33,9 +33,14 @@ pipeline {
                         )
                     }
 
-                    // Récupérer dynamiquement le .jar généré
-                    def jarFile = sh(script: "ls target/*.jar", returnStdout: true).trim()
-                    echo "Le fichier JAR généré est : ${jarFile}"
+                    // Récupérer dynamiquement le .jar généré (premier trouvé)
+                    def jarFile = sh(script: "ls target/*.jar | head -n 1", returnStdout: true).trim()
+                    echo "Fichier JAR généré : ${jarFile}"
+
+                    // Vérifier que le fichier existe
+                    if (!fileExists(jarFile)) {
+                        error "Le fichier JAR ${jarFile} est introuvable"
+                    }
 
                     // Build et push Docker avec le .jar exact
                     dockerBuildFullImage(
@@ -48,6 +53,7 @@ pipeline {
         }
     }
 }
+
 
 
 
