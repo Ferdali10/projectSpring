@@ -13,20 +13,20 @@ pipeline {
         stage('Build et Déploiement') {
             steps {
                 script {
-                    // ✅ Correction ici : URL du bon dépôt
+                    // Clonage du dépôt
                     cloneRepo(
                         repoUrl: "https://github.com/Ferdali10/projectSpring.git",
                         branch: "master",
                         credentialsId: "github-pat"
                     )
 
-                    // 2. Build avec Maven
+                    // Build avec Maven
                     buildProject(
                         buildTool: 'maven',
                         args: "-Pprod -Dspring.profiles.active=prod"
                     )
 
-                    // 3. Build et Push Docker
+                    // Build et push Docker
                     dockerBuildFullImage(
                         imageName: "dalifer/springfoyer",
                         tags: ["latest", "${env.BUILD_NUMBER}"],
@@ -37,3 +37,4 @@ pipeline {
         }
     }
 }
+
