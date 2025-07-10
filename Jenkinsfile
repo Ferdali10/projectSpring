@@ -26,27 +26,19 @@ pipeline {
                     ]) {
                         buildProject(
                             buildTool: 'maven',
-                            args: "-Dspring.profiles.active=prod"
+                            args: "-DskipTests -Dspring.profiles.active=prod"
                         )
                     }
 
-                    // 💥 Ajout de debug pour afficher le contenu de target/
-                    sh 'pwd'
-                    sh 'ls -la target'
+                    // Ici on n’essaie pas de deviner, on utilise le nom exact
+                    def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
+                    def jarPath = "target/${jarFileName}"
 
-                    // Récupération du jar
-                    def jarPath = sh(script: 'ls target/*.jar | head -n 1', returnStdout: true).trim()
-                    echo "Chemin du JAR généré : ${jarPath}"
+                    echo "Fichier JAR généré : ${jarPath}"
 
-                    // Vérification avec shell
-                    def exists = sh(script: "[ -f '${jarPath}' ] && echo exists || echo missing", returnStdout: true).trim()
-                    if (exists != "exists") {
-                        error "Le fichier JAR ${jarPath} est introuvable (vérifié par shell)"
+                    if (!fileExists(jarPath)) {
+                        error "❌ Le fichier JAR ${jarPath} est introuvable."
                     }
-
-                    // Nom du jar
-                    def jarFileName = jarPath.tokenize('/').last()
-                    echo "Nom du JAR à injecter dans Docker : ${jarFileName}"
 
                     dockerBuildFullImage(
                         imageName: "dalifer/springfoyer",
@@ -58,6 +50,7 @@ pipeline {
         }
     }
 }
+
 
 
 
