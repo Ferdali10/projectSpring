@@ -25,16 +25,17 @@ pipeline {
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
+                        // Build Maven
                         buildProject(
                             buildTool: 'maven',
                             args: "-DskipTests -Dspring.profiles.active=prod"
                         )
 
+                        // Vérification du JAR
                         def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
                         def jarPath = "target/${jarFileName}"
 
                         echo "Vérification du fichier JAR : ${jarPath}"
-
                         def jarExists = sh(
                             script: "test -f ${jarPath} && echo 'EXISTS' || echo 'NOT_FOUND'",
                             returnStdout: true
@@ -47,17 +48,13 @@ pipeline {
                         } else {
                             echo "✅ Fichier JAR trouvé : ${jarPath}"
 
+                            // Build + push image Docker
                             dockerBuildFullImage(
                                 imageName: "dalifer/springfoyer",
                                 tags: ["latest", "${env.BUILD_NUMBER}"],
-                                buildArgs: "--build-arg JAR_FILE=${jarFileName}"
+                                buildArgs: "--build-arg JAR_FILE=${jarFileName}",
+                                credentialsId: "docker-hub-creds"
                             )
-
-                            // ✅ Push de l'image Docker
-                            withDockerRegistry([credentialsId: 'docker-hub-credentials', url: 'https://registry.hub.docker.com']) {
-                                sh "docker push dalifer/springfoyer:latest"
-                                sh "docker push dalifer/springfoyer:${env.BUILD_NUMBER}"
-                            }
                         }
                     }
                 }
@@ -77,6 +74,7 @@ pipeline {
         }
     }
 }
+
 
 
 
