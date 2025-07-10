@@ -19,37 +19,40 @@ pipeline {
                         credentialsId: "github-pat"
                     )
 
-                    withEnv([
-                        "SPRING_DATASOURCE_URL=${env.DB_URL}",
-                        "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
-                        "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
-                    ]) {
-                        buildProject(
-                            buildTool: 'maven',
-                            args: "-DskipTests -Dspring.profiles.active=prod"
+                    // 📁 On entre dans le dossier cloné
+                    dir('projectSpring') {
+                        withEnv([
+                            "SPRING_DATASOURCE_URL=${env.DB_URL}",
+                            "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
+                            "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
+                        ]) {
+                            buildProject(
+                                buildTool: 'maven',
+                                args: "-DskipTests -Dspring.profiles.active=prod"
+                            )
+                        }
+
+                        def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
+                        def jarPath = "target/${jarFileName}"
+
+                        echo "Fichier JAR généré : ${jarPath}"
+
+                        if (!fileExists(jarPath)) {
+                            error "❌ Le fichier JAR ${jarPath} est introuvable."
+                        }
+
+                        dockerBuildFullImage(
+                            imageName: "dalifer/springfoyer",
+                            tags: ["latest", "${env.BUILD_NUMBER}"],
+                            buildArgs: "--build-arg JAR_FILE=${jarFileName}"
                         )
                     }
-
-                    // Ici on n’essaie pas de deviner, on utilise le nom exact
-                    def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
-                    def jarPath = "target/${jarFileName}"
-
-                    echo "Fichier JAR généré : ${jarPath}"
-
-                    if (!fileExists(jarPath)) {
-                        error "❌ Le fichier JAR ${jarPath} est introuvable."
-                    }
-
-                    dockerBuildFullImage(
-                        imageName: "dalifer/springfoyer",
-                        tags: ["latest", "${env.BUILD_NUMBER}"],
-                        buildArgs: "--build-arg JAR_FILE=${jarFileName}"
-                    )
                 }
             }
         }
     }
 }
+
 
 
 
