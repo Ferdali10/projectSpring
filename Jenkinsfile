@@ -113,19 +113,16 @@ pipeline {
             script {
                 // Nettoyage des fichiers temporaires
                 sh 'rm -f html.tpl trivy-report.* || true'
+                
+                // Alternative aux notifications Slack (via email ou logs)
+                if (currentBuild.result == 'SUCCESS') {
+                    echo "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                    // emailext to: 'team@example.com', subject: "Build réussi", body: "Détails..."
+                } else {
+                    echo "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                    // emailext to: 'devops-alerts@example.com', subject: "Build échoué", body: "Détails..."
+                }
             }
-        }
-        success {
-            slackSend(
-                channel: '#devops',
-                message: "✅ Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            )
-        }
-        failure {
-            slackSend(
-                channel: '#devops-alerts',
-                message: "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-            )
         }
     }
 }
