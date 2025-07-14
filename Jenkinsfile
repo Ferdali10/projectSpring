@@ -7,14 +7,13 @@ pipeline {
         DB_URL = 'jdbc:mysql://192.168.11.100:3306/springfoyer'
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
+        TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl'
     }
 
     stages {
-
         stage('🚀 Build et Déploiement Complet') {
             steps {
                 script {
-                    // Clone du repository
                     cloneRepo(
                         repoUrl: "https://github.com/Ferdali10/projectSpring.git",
                         branch: "master",
@@ -26,7 +25,6 @@ pipeline {
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
-                        // Build Maven
                         buildProject(
                             buildTool: 'maven',
                             args: "-DskipTests -Dspring.profiles.active=prod"
@@ -35,20 +33,10 @@ pipeline {
                         def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
                         def jarPath = "target/${jarFileName}"
 
-                        echo "Vérification du fichier JAR : ${jarPath}"
-                        def jarExists = sh(
-                            script: "test -f ${jarPath} && echo 'EXISTS' || echo 'NOT_FOUND'",
-                            returnStdout: true
-                        ).trim()
-
-                        if (jarExists == 'NOT_FOUND') {
-                            sh 'ls -la target/ || echo "Répertoire target introuvable"'
-                            error "❌ Le fichier JAR ${jarPath} est introuvable."
+                        if (!fileExists(jarPath)) {
+                            error "❌ Fichier JAR ${jarPath} introuvable"
                         }
 
-                        echo "✅ Fichier JAR trouvé : ${jarPath}"
-
-                        // Build et push image Docker
                         dockerBuildFullImage(
                             imageName: "dalifer/springfoyer",
                             tags: ["latest", "${env.BUILD_NUMBER}"],
@@ -65,59 +53,54 @@ pipeline {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
 
-                    echo "📥 Téléchargement de la base Trivy (si nécessaire)"
-                    sh 'trivy image --download-db-only || true'
-
-                    echo "🔎 Lancement du scan Trivy sur l'image : ${imageName}"
-                    sh "trivy image --severity HIGH,CRITICAL --format json -o trivy-report.json ${imageName} || true"
-
-                    // Générer un rapport HTML (nécessite contrib/html.tpl fourni par Trivy)
+                    // 1. Préparation de l'environnement Trivy
                     sh """
-                        trivy image \
-                        --severity HIGH,CRITICAL \
-                        --format template \
-                        --template '@contrib/html.tpl' \
-                        -o trivy-report.html \
-                        ${imageName} || true
+                        # Téléchargement du template HTML
+                        curl -sLO ${env.TRIVY_TEMPLATE_URL}
+                        
+                        # Mise à jour de la base de données
+                        trivy image --download-db-only
                     """
 
-                    // Lecture du JSON pour compter les vulnérabilités
-                    def trivyJson = readJSON file: 'trivy-report.json'
-                    def vulnCount = 0
-                    def vulnSummary = ""
+                    // 2. Analyse de sécurité
+                    sh """
+                        # Scan complet avec sortie JSON
+                        trivy image --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format json \
+                            -o trivy-report.json \
+                            ${imageName}
+                            
+                        # Génération du rapport HTML
+                        trivy image --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format template \
+                            --template '@html.tpl' \
+                            -o trivy-report.html \
+                            ${imageName}
+                    """
 
-                    trivyJson.Results.each { result ->
-                        if (result.Vulnerabilities) {
-                            result.Vulnerabilities.each { vuln ->
-                                if (["HIGH", "CRITICAL"].contains(vuln.Severity)) {
-                                    vulnCount++
-                                    vulnSummary += "- ${vuln.VulnerabilityID} (${vuln.Severity}) in ${vuln.PkgName} [${vuln.Title}]\n"
-                                }
-                            }
-                        }
+                    // 3. Analyse des résultats
+                    def report = readJSON file: 'trivy-report.json'
+                    def criticalVulns = report.Results
+                        .findAll { it.Vulnerabilities }
+                        .collectMany { it.Vulnerabilities }
+                        .count { it.Severity == "CRITICAL" }
+
+                    if (criticalVulns > 0) {
+                        error "❌ ${criticalVulns} vulnérabilités CRITICAL détectées"
                     }
 
-                    echo "🚨 Vulnérabilités critiques/hautes détectées : ${vulnCount}"
-
-                    if (vulnCount > 3) {
-                        echo "❌ Trop de vulnérabilités critiques (>${3})"
-                        echo "📋 Détail des vulnérabilités :\n${vulnSummary}"
-                        error("Pipeline stoppé pour raison de sécurité.")
-                    } else {
-                        echo "✅ Moins de 3 vulnérabilités importantes détectées. Poursuite du pipeline."
-                    }
-
-                    archiveArtifacts artifacts: 'trivy-report.json', fingerprint: true
-
-                    // Publier le rapport HTML dans Jenkins
+                    // 4. Publication des rapports
+                    archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
+                    
                     publishHTML([
                         allowMissing: false,
-                        alwaysLinkToLastBuild: true,
                         keepAll: true,
                         reportDir: '.',
                         reportFiles: 'trivy-report.html',
-                        reportName: 'Trivy - Rapport de Sécurité',
-                        reportTitles: 'Analyse des vulnérabilités Docker'
+                        reportName: 'Rapport Trivy',
+                        reportTitles: 'Vulnérabilités Docker'
                     ])
                 }
             }
@@ -127,12 +110,22 @@ pipeline {
     post {
         always {
             sh 'docker system prune -f || true'
+            script {
+                // Nettoyage des fichiers temporaires
+                sh 'rm -f html.tpl trivy-report.* || true'
+            }
         }
         success {
-            echo "🎉 Pipeline exécuté avec succès !"
+            slackSend(
+                channel: '#devops',
+                message: "✅ Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            )
         }
         failure {
-            echo "❌ Pipeline échoué. Vérifiez les logs ci-dessus."
+            slackSend(
+                channel: '#devops-alerts',
+                message: "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+            )
         }
     }
 }
