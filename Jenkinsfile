@@ -2,6 +2,9 @@
 
 pipeline {
     agent any
+    options {
+        skipDefaultCheckout true  // Désactive le checkout SCM automatique
+    }
 
     environment {
         DB_URL = 'jdbc:mysql://192.168.11.100:3306/springfoyer'
@@ -10,8 +13,7 @@ pipeline {
     }
 
     stages {
-        // Étape 1 : Clone du code source
-        stage('🔁 1. Clone du dépôt Git') {
+        stage('🔁 1. Récupération du code') {
             steps {
                 script {
                     cloneRepo(
@@ -23,8 +25,7 @@ pipeline {
             }
         }
 
-        // Étape 2 : Build et packaging
-        stage('🏗 2. Build Java (Maven)') {
+        stage('🏗 2. Compilation et packaging') {
             steps {
                 script {
                     withEnv([
@@ -37,28 +38,21 @@ pipeline {
                             args: "-DskipTests -Dspring.profiles.active=prod"
                         )
 
-                        // Vérification du JAR (conservée inchangée)
+                        // Vérification du JAR
                         def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
                         def jarPath = "target/${jarFileName}"
-                        def jarExists = sh(
-                            script: "test -f ${jarPath} && echo 'EXISTS' || echo 'NOT_FOUND'",
-                            returnStdout: true
-                        ).trim()
-
-                        if (jarExists == 'NOT_FOUND') {
-                            sh 'echo "=== Contenu du répertoire target ==="'
+                        
+                        if (!fileExists(jarPath)) {
                             sh 'ls -la target/ || echo "Répertoire target introuvable"'
-                            error "❌ Le fichier JAR ${jarPath} est introuvable."
-                        } else {
-                            echo "✅ Fichier JAR trouvé : ${jarPath}"
+                            error "❌ Fichier JAR ${jarPath} introuvable"
                         }
+                        echo "✅ JAR généré : ${jarPath}"
                     }
                 }
             }
         }
 
-        // Étape 3 : Construction et déploiement de l'image Docker
-        stage('🐳 3. Build & Push Docker') {
+        stage('🐳 3. Construction et déploiement Docker') {
             steps {
                 script {
                     dockerBuildFullImage(
@@ -78,9 +72,10 @@ pipeline {
         }
         success {
             echo "🎉 Pipeline exécuté avec succès !"
+            archiveArtifacts artifacts: 'target/*.jar', allowEmptyArchive: true
         }
         failure {
-            echo "❌ Pipeline échoué. Vérifiez les logs ci-dessus."
+            echo "❌ Échec du pipeline - Consultez les logs"
         }
     }
 }
