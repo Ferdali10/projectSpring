@@ -2,83 +2,67 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Rapport Trivy - Docker Image Scan</title>
+    <title>Trivy Vulnerability Report</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        body { font-family: Arial; padding: 20px; background: #f8f9fa; }
-        h1 { color: #333; }
-        .section { margin-bottom: 40px; }
-        canvas { max-width: 600px; }
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 8px 12px; border: 1px solid #ccc; }
+        th { background-color: #f2f2f2; }
     </style>
 </head>
 <body>
-    <h1>📊 Rapport Trivy</h1>
+    <h1>🔍 Trivy Vulnerability Report</h1>
+    <p>Generated at: {{ .GeneratedAt }}</p>
 
-    <div class="section">
-        <h2>Vulnérabilités détectées</h2>
-        <canvas id="vulnChart"></canvas>
-    </div>
-
-    <div class="section">
-        <h2>Détails par composant</h2>
-        {{- range .Results }}
-            {{ if .Vulnerabilities }}
-                <h3>{{ .Target }}</h3>
-                <table border="1" cellspacing="0" cellpadding="5">
-                    <thead>
-                        <tr><th>ID</th><th>Pkg</th><th>Version</th><th>Severity</th><th>Title</th></tr>
-                    </thead>
-                    <tbody>
-                    {{- range .Vulnerabilities }}
-                        <tr>
-                            <td>{{ .VulnerabilityID }}</td>
-                            <td>{{ .PkgName }}</td>
-                            <td>{{ .InstalledVersion }}</td>
-                            <td>{{ .Severity }}</td>
-                            <td>{{ .Title }}</td>
-                        </tr>
-                    {{- end }}
-                    </tbody>
-                </table>
-            {{- end }}
-        {{- end }}
-    </div>
+    <canvas id="severityChart" width="400" height="200"></canvas>
 
     <script>
-        // Collect data from template
-        const severities = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"];
-        const counts = {
-            "CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0
+        const data = {
+            labels: ["UNKNOWN", "LOW", "MEDIUM", "HIGH", "CRITICAL"],
+            datasets: [{
+                label: 'Nombre de vulnérabilités',
+                data: [
+                    {{ len (filterVulns .Vulnerabilities "UNKNOWN") }},
+                    {{ len (filterVulns .Vulnerabilities "LOW") }},
+                    {{ len (filterVulns .Vulnerabilities "MEDIUM") }},
+                    {{ len (filterVulns .Vulnerabilities "HIGH") }},
+                    {{ len (filterVulns .Vulnerabilities "CRITICAL") }}
+                ],
+                backgroundColor: ["gray", "green", "orange", "red", "darkred"]
+            }]
         };
 
-        {{- range .Results }}
-            {{- range .Vulnerabilities }}
-                counts["{{ .Severity }}"] = (counts["{{ .Severity }}"] || 0) + 1;
-            {{- end }}
-        {{- end }}
-
-        const ctx = document.getElementById('vulnChart').getContext('2d');
-        new Chart(ctx, {
+        new Chart(document.getElementById('severityChart'), {
             type: 'bar',
-            data: {
-                labels: severities,
-                datasets: [{
-                    label: 'Vulnérabilités détectées',
-                    data: severities.map(s => counts[s]),
-                    backgroundColor: [
-                        '#dc3545', '#fd7e14', '#ffc107', '#0d6efd', '#6c757d'
-                    ],
-                    borderColor: '#ccc',
-                    borderWidth: 1
-                }]
-            },
-            options: {
-                scales: {
-                    y: { beginAtZero: true }
-                }
-            }
+            data: data
         });
     </script>
+
+    <h2>Détails des vulnérabilités</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Paquet</th>
+                <th>Version</th>
+                <th>Vulnérabilité</th>
+                <th>Gravité</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {{ range .Vulnerabilities }}
+            <tr>
+                <td>{{ .PkgName }}</td>
+                <td>{{ .InstalledVersion }}</td>
+                <td><a href="{{ .PrimaryURL }}" target="_blank">{{ .VulnerabilityID }}</a></td>
+                <td>{{ .Severity }}</td>
+                <td>{{ .Title }}</td>
+            </tr>
+            {{ end }}
+        </tbody>
+    </table>
 </body>
 </html>
+
 
