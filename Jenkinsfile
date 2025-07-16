@@ -7,7 +7,7 @@ pipeline {
         DB_URL = 'jdbc:mysql://192.168.11.100:3306/springfoyer'
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
-        TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/ferdali10/trivy-html-template/main/advanced-html.tpl'
+        TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
     }
 
     stages {
@@ -51,10 +51,53 @@ pipeline {
         stage('🔍 Analyse Trivy') {
             steps {
                 script {
-                    generateTrivyReport(
-                        image: "dalifer/springfoyer:latest",
-                        template: "${env.TRIVY_TEMPLATE_URL}"
-                    )
+                    def imageName = "dalifer/springfoyer:latest"
+
+                    // 1. Télécharger le template HTML avancé
+                    sh """
+                        curl -sLO ${env.TRIVY_TEMPLATE_URL}
+                        mv advanced-html.tpl html.tpl
+                        trivy image --download-db-only
+                    """
+
+                    // 2. Scanner l'image Docker
+                    sh """
+                        trivy image --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format json \
+                            -o trivy-report.json \
+                            ${imageName}
+
+                        trivy image --severity HIGH,CRITICAL \
+                            --ignore-unfixed \
+                            --format template \
+                            --template '@html.tpl' \
+                            -o trivy-report.html \
+                            ${imageName}
+                    """
+
+                    // 3. Vérification des vulnérabilités CRITICAL
+                    def report = readJSON file: 'trivy-report.json'
+                    def criticalVulns = report.Results
+                        .findAll { it.Vulnerabilities }
+                        .collectMany { it.Vulnerabilities }
+                        .count { it.Severity == "CRITICAL" }
+
+                    if (criticalVulns > 0) {
+                        error "❌ ${criticalVulns} vulnérabilités CRITICAL détectées"
+                    }
+
+                    // 4. Publication du rapport
+                    archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
+
+                    publishHTML([
+                        allowMissing: false,
+                        keepAll: true,
+                        reportDir: '.',
+                        reportFiles: 'trivy-report.html',
+                        reportName: 'Rapport Trivy',
+                        reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)'
+                    ])
                 }
             }
         }
@@ -68,15 +111,14 @@ pipeline {
 
                 if (currentBuild.result == 'SUCCESS') {
                     echo "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                    // emailext to: 'team@example.com', subject: "Build réussi", body: "Détails..."
                 } else {
                     echo "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                    // emailext to: 'devops-alerts@example.com', subject: "Build échoué", body: "Détails..."
                 }
             }
         }
     }
 }
+
 
 
 
