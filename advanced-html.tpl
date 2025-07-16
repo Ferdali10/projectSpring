@@ -29,11 +29,9 @@
     {{ range . }}
       {{ if .Vulnerabilities }}
         {{ range .Vulnerabilities }}
-          let sev = "{{ .Severity }}";
-          let i = data.labels.indexOf(sev);
-          if (i !== -1) {
-            data.datasets[0].data[i]++;
-          }
+          const severity = "{{ .Severity }}";
+          const idx = data.labels.indexOf(severity);
+          if (idx >= 0) { data.datasets[0].data[idx]++; }
         {{ end }}
       {{ end }}
     {{ end }}
@@ -48,13 +46,39 @@
   {{ $total := 0 }}
   {{ range . }}
     {{ if .Vulnerabilities }}
-      {{ $target := .Target }}
-      <h3>{{ $target }}</h3>
+      <h3>{{ .Target }}</h3>
       <table>
         <thead>
           <tr>
             <th>ID</th>
-            <th>Package
+            <th>Package</th>
+            <th>Version</th>
+            <th>Gravité</th>
+            <th>Lien</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{ range .Vulnerabilities }}
+            {{ $total = add $total 1 }}
+            <tr>
+              <td>{{ .VulnerabilityID }}</td>
+              <td>{{ .PkgName }}</td>
+              <td>{{ .InstalledVersion }}</td>
+              <td>{{ .Severity }}</td>
+              <td><a href="{{ .PrimaryURL }}" target="_blank">🔗</a></td>
+            </tr>
+          {{ end }}
+        </tbody>
+      </table>
+    {{ end }}
+  {{ end }}
+
+  {{ if eq $total 0 }}
+    <p class="no-vuln">✅ Aucune vulnérabilité détectée.</p>
+  {{ end }}
+</body>
+</html>
+
 
 
 
