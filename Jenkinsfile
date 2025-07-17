@@ -8,6 +8,8 @@ pipeline {
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
         TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
+        SONAR_PROJECT_KEY = 'springfoyer'
+        SONAR_PROJECT_NAME = 'springFoyer'
     }
 
     stages {
@@ -25,6 +27,33 @@ pipeline {
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
+                        // Étape d'analyse SonarQube ajoutée ici
+                        stage('📊 Analyse SonarQube') {
+                            withSonarQubeEnv('SonarQubeServer') {
+                                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                                    sh """
+                                        mvn sonar:sonar \
+                                        -Dsonar.login=\$SONAR_TOKEN \
+                                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                                        -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
+                                        -Dsonar.sources=src/main/java \
+                                        -Dsonar.tests=src/test/java \
+                                        -Dsonar.java.binaries=target/classes
+                                    """
+                                }
+                            }
+                        }
+
+                        // Quality Gate
+                        stage('🛂 Vérification Quality Gate') {
+                            timeout(time: 5, unit: 'MINUTES') {
+                                def qg = waitForQualityGate()
+                                if (qg.status != 'OK') {
+                                    error "Quality Gate échouée : ${qg.status}"
+                                }
+                            }
+                        }
+
                         buildProject(
                             buildTool: 'maven',
                             args: "-DskipTests -Dspring.profiles.active=prod"
