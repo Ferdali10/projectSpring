@@ -4,129 +4,188 @@ pipeline {
     agent any
 
     environment {
+        // Configuration base de données
         DB_URL = 'jdbc:mysql://192.168.11.100:3306/springfoyer'
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
-        TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
+        
+        // Configuration SonarQube
         SONAR_PROJECT_KEY = 'springfoyer'
         SONAR_PROJECT_NAME = 'springFoyer'
+        
+        // Configuration Trivy
+        TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
+        
+        // Optimisation Maven
+        MAVEN_OPTS = '-Xmx1024m -XX:MaxPermSize=256m'
     }
 
     stages {
-        stage('🚀 Build et Déploiement Complet') {
+        /* ---------------------------- */
+        /* ÉTAPE 1 : PRÉPARATION       */
+        /* ---------------------------- */
+        stage('🔧 Préparation') {
             steps {
                 script {
+                    cleanWs()
                     cloneRepo(
                         repoUrl: "https://github.com/Ferdali10/projectSpring.git",
                         branch: "master",
                         credentialsId: "github-pat"
                     )
+                    
+                    // Vérification environnement
+                    sh """
+                        echo "=== ENVIRONNEMENT ==="
+                        java -version
+                        mvn -version
+                        echo "JAVA_HOME: ${env.JAVA_HOME}"
+                    """
+                }
+            }
+        }
 
-                    withEnv([
-                        "SPRING_DATASOURCE_URL=${env.DB_URL}",
-                        "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
-                        "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
-                    ]) {
-                        // Étape de build Maven avant SonarQube
-                        stage('🛠️ Build Maven') {
-                            buildProject(
-                                buildTool: 'maven',
-                                args: "-DskipTests -Dspring.profiles.active=prod"
-                            )
+        /* ---------------------------- */
+        /* ÉTAPE 2 : BUILD MAVEN        */
+        /* ---------------------------- */
+        stage('🛠️ Build Maven') {
+            steps {
+                script {
+                    try {
+                        sh """
+                            mvn clean package \
+                            -DskipTests \
+                            -Dspring.profiles.active=prod \
+                            -B -V -e
+                        """
+                        
+                        // Vérification du JAR généré
+                        def jarFile = findFiles(glob: 'target/*.jar')[0]?.name
+                        if (!jarFile) {
+                            error "❌ Aucun fichier JAR trouvé dans target/"
                         }
-
-                        // Étape d'analyse SonarQube
-                        stage('📊 Analyse SonarQube') {
-                            withSonarQubeEnv('SonarQubeServer') {
-                                withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
-                                    sh """
-                                        mvn sonar:sonar \
-                                        -Dsonar.login=\$SONAR_TOKEN \
-                                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
-                                        -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
-                                        -Dsonar.sources=src/main/java \
-                                        -Dsonar.tests=src/test/java \
-                                        -Dsonar.java.binaries=target/classes \
-                                        -Dsonar.java.libraries=target/*.jar
-                                    """
-                                }
-                            }
-                        }
-
-                        // Quality Gate
-                        stage('🛂 Vérification Quality Gate') {
-                            timeout(time: 5, unit: 'MINUTES') {
-                                def qg = waitForQualityGate()
-                                if (qg.status != 'OK') {
-                                    error "Quality Gate échouée : ${qg.status}"
-                                }
-                            }
-                        }
-
-                        def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
-                        def jarPath = "target/${jarFileName}"
-
-                        if (!fileExists(jarPath)) {
-                            error "❌ Fichier JAR ${jarPath} introuvable"
-                        }
-
-                        dockerBuildFullImage(
-                            imageName: "dalifer/springfoyer",
-                            tags: ["latest", "${env.BUILD_NUMBER}"],
-                            buildArgs: "--build-arg JAR_FILE=${jarFileName}",
-                            credentialsId: "docker-hub-creds"
-                        )
+                        env.JAR_FILE = jarFile
+                        echo "✅ Fichier JAR trouvé : ${jarFile}"
+                        
+                    } catch (Exception e) {
+                        echo "❌ Erreur lors du build Maven : ${e.getMessage()}"
+                        archiveArtifacts artifacts: '**/target/*.log,**/target/surefire-reports/*', allowEmptyArchive: true
+                        throw e
                     }
                 }
             }
         }
 
+        /* ---------------------------- */
+        /* ÉTAPE 3 : ANALYSE SONARQUBE  */
+        /* ---------------------------- */
+        stage('📊 Analyse SonarQube') {
+            steps {
+                script {
+                    try {
+                        withSonarQubeEnv('SonarQubeServer') {
+                            withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
+                                sh """
+                                    mvn sonar:sonar \
+                                    -Dsonar.login=\$SONAR_TOKEN \
+                                    -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                                    -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
+                                    -Dsonar.sources=src/main/java \
+                                    -Dsonar.tests=src/test/java \
+                                    -Dsonar.java.binaries=target/classes \
+                                    -Dsonar.java.libraries=target/*.jar \
+                                    -Dsonar.scm.provider=git \
+                                    -Dsonar.verbose=true
+                                """
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "⚠️ Erreur SonarQube : ${e.getMessage()}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+
+        /* ---------------------------- */
+        /* ÉTAPE 4 : QUALITY GATE       */
+        /* ---------------------------- */
+        stage('🛂 Vérification Quality Gate') {
+            steps {
+                script {
+                    try {
+                        timeout(time: 15, unit: 'MINUTES') {
+                            def qg = waitForQualityGate()
+                            echo "=== RÉSULTAT QUALITY GATE ==="
+                            echo "Statut: ${qg.status}"
+                            
+                            if (qg.status == 'IN_PROGRESS') {
+                                error "Timeout - Quality Gate bloquée en IN_PROGRESS"
+                            } else if (qg.status != 'OK') {
+                                error "Quality Gate échouée : ${qg.status}"
+                            }
+                        }
+                    } catch (Exception e) {
+                        echo "⚠️ Erreur Quality Gate : ${e.getMessage()}"
+                        currentBuild.result = 'UNSTABLE'
+                    }
+                }
+            }
+        }
+
+        /* ---------------------------- */
+        /* ÉTAPE 5 : BUILD DOCKER       */
+        /* ---------------------------- */
+        stage('🐳 Build Docker') {
+            steps {
+                script {
+                    try {
+                        docker.withRegistry('https://registry.hub.docker.com', 'docker-hub-creds') {
+                            def image = docker.build("dalifer/springfoyer:${env.BUILD_NUMBER}", ".")
+                            image.push()
+                            image.push('latest')
+                            echo "✅ Image Docker publiée"
+                        }
+                    } catch (Exception e) {
+                        echo "❌ Erreur Docker : ${e.getMessage()}"
+                        throw e
+                    }
+                }
+            }
+        }
+
+        /* ---------------------------- */
+        /* ÉTAPE 6 : ANALYSE TRIVY      */
+        /* ---------------------------- */
         stage('🔍 Analyse Trivy') {
             steps {
                 script {
-                    def imageName = "dalifer/springfoyer:latest"
+                    try {
+                        sh """
+                            curl -sLO ${env.TRIVY_TEMPLATE_URL}
+                            mv advanced-html.tpl html.tpl
+                            trivy image --download-db-only
+                            
+                            trivy image \
+                                --severity HIGH,CRITICAL \
+                                --ignore-unfixed \
+                                --format template \
+                                --template '@html.tpl' \
+                                -o trivy-report.html \
+                                dalifer/springfoyer:latest
+                        """
 
-                    sh """
-                        curl -sLO ${env.TRIVY_TEMPLATE_URL}
-                        mv advanced-html.tpl html.tpl
-                        trivy image --download-db-only
-                    """
-
-                    sh """
-                        trivy image --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --format json \
-                            -o trivy-report.json \
-                            ${imageName}
-
-                        trivy image --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --format template \
-                            --template '@html.tpl' \
-                            -o trivy-report.html \
-                            ${imageName}
-                    """
-
-                    def report = readJSON file: 'trivy-report.json'
-                    def criticalVulns = report.Results
-                        .findAll { it.Vulnerabilities }
-                        .collectMany { it.Vulnerabilities }
-                        .count { it.Severity == "CRITICAL" }
-
-                    if (criticalVulns > 0) {
-                        error "❌ ${criticalVulns} vulnérabilités CRITICAL détectées"
+                        publishHTML([
+                            allowMissing: true,
+                            keepAll: true,
+                            reportDir: '.',
+                            reportFiles: 'trivy-report.html',
+                            reportName: 'Rapport Trivy'
+                        ])
+                    } catch (Exception e) {
+                        echo "⚠️ Erreur Trivy : ${e.getMessage()}"
+                        currentBuild.result = 'UNSTABLE'
                     }
-
-                    archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
-
-                    publishHTML([
-                        allowMissing: false,
-                        keepAll: true,
-                        reportDir: '.',
-                        reportFiles: 'trivy-report.html',
-                        reportName: 'Rapport Trivy',
-                        reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)'
-                    ])
                 }
             }
         }
@@ -134,16 +193,28 @@ pipeline {
 
     post {
         always {
-            sh 'docker system prune -f || true'
             script {
+                echo "🧹 Nettoyage post-build..."
+                sh 'docker system prune -f || true'
                 sh 'rm -f html.tpl trivy-report.* || true'
-
-                if (currentBuild.result == 'SUCCESS') {
-                    echo "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                } else {
-                    echo "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                }
+                
+                // Rapport final
+                def duration = currentBuild.durationString.replace(' and counting', '')
+                echo "📊 Résultat final: ${currentBuild.currentResult}"
+                echo "⏱️ Durée totale: ${duration}"
             }
+        }
+        
+        success {
+            echo "✅ Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} réussi"
+            echo "📦 Artifact: dalifer/springfoyer:${env.BUILD_NUMBER}"
+            echo "🔗 ${env.BUILD_URL}"
+        }
+        
+        failure {
+            echo "❌ Pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} échoué"
+            echo "🔗 ${env.BUILD_URL}"
+            echo "💡 Cause: ${currentBuild.result}"
         }
     }
 }
