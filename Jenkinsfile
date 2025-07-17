@@ -27,6 +27,14 @@ pipeline {
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
+                        // Étape de build Maven avant SonarQube
+                        stage('🛠️ Build Maven') {
+                            buildProject(
+                                buildTool: 'maven',
+                                args: "-DskipTests -Dspring.profiles.active=prod"
+                            )
+                        }
+
                         // Étape d'analyse SonarQube
                         stage('📊 Analyse SonarQube') {
                             withSonarQubeEnv('SonarQubeServer') {
@@ -38,7 +46,8 @@ pipeline {
                                         -Dsonar.projectName="${env.SONAR_PROJECT_NAME}" \
                                         -Dsonar.sources=src/main/java \
                                         -Dsonar.tests=src/test/java \
-                                        -Dsonar.java.binaries=target/classes
+                                        -Dsonar.java.binaries=target/classes \
+                                        -Dsonar.java.libraries=target/*.jar
                                     """
                                 }
                             }
@@ -53,11 +62,6 @@ pipeline {
                                 }
                             }
                         }
-
-                        buildProject(
-                            buildTool: 'maven',
-                            args: "-DskipTests -Dspring.profiles.active=prod"
-                        )
 
                         def jarFileName = "springFoyer-0.0.2-SNAPSHOT.jar"
                         def jarPath = "target/${jarFileName}"
