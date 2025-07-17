@@ -27,10 +27,10 @@ pipeline {
                         "SPRING_DATASOURCE_USERNAME=${env.DB_USER}",
                         "SPRING_DATASOURCE_PASSWORD=${env.DB_PASSWORD}"
                     ]) {
-                        // Étape d'analyse SonarQube ajoutée ici
+                        // Étape d'analyse SonarQube
                         stage('📊 Analyse SonarQube') {
                             withSonarQubeEnv('SonarQubeServer') {
-                                withCredentials([string(credentialsId: 'sonar-token', variable: 'SONAR_TOKEN')]) {
+                                withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                                     sh """
                                         mvn sonar:sonar \
                                         -Dsonar.login=\$SONAR_TOKEN \
@@ -82,14 +82,12 @@ pipeline {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
 
-                    // 1. Télécharger le template HTML avancé
                     sh """
                         curl -sLO ${env.TRIVY_TEMPLATE_URL}
                         mv advanced-html.tpl html.tpl
                         trivy image --download-db-only
                     """
 
-                    // 2. Scanner l'image Docker
                     sh """
                         trivy image --severity HIGH,CRITICAL \
                             --ignore-unfixed \
@@ -105,7 +103,6 @@ pipeline {
                             ${imageName}
                     """
 
-                    // 3. Vérification des vulnérabilités CRITICAL
                     def report = readJSON file: 'trivy-report.json'
                     def criticalVulns = report.Results
                         .findAll { it.Vulnerabilities }
@@ -116,7 +113,6 @@ pipeline {
                         error "❌ ${criticalVulns} vulnérabilités CRITICAL détectées"
                     }
 
-                    // 4. Publication du rapport
                     archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
 
                     publishHTML([
