@@ -8,6 +8,7 @@ pipeline {
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
         TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
+        SKIP_QUALITY_GATE = 'false' // ➕ change à 'true' si tu veux ignorer temporairement
     }
 
     stages {
@@ -48,19 +49,39 @@ pipeline {
             }
         }
 
+        stage('📊 Analyse SonarQube') {
+            environment {
+                SONARQUBE_SCANNER_PARAMS = "-Dsonar.projectKey=springfoyer"
+            }
+            steps {
+                withSonarQubeEnv('SonarQubeServer') {
+                    sh 'mvn sonar:sonar ${SONARQUBE_SCANNER_PARAMS}'
+                }
+            }
+        }
+
+        stage('🛂 Vérification Quality Gate') {
+            when {
+                expression { return env.SKIP_QUALITY_GATE != 'true' }
+            }
+            steps {
+                timeout(time: 15, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
         stage('🔍 Analyse Trivy') {
             steps {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
 
-                    // 1. Télécharger le template HTML avancé
                     sh """
                         curl -sLO ${env.TRIVY_TEMPLATE_URL}
                         mv advanced-html.tpl html.tpl
                         trivy image --download-db-only
                     """
 
-                    // 2. Scanner l'image Docker
                     sh """
                         trivy image --severity HIGH,CRITICAL \
                             --ignore-unfixed \
@@ -76,7 +97,6 @@ pipeline {
                             ${imageName}
                     """
 
-                    // 3. Vérification des vulnérabilités CRITICAL
                     def report = readJSON file: 'trivy-report.json'
                     def criticalVulns = report.Results
                         .findAll { it.Vulnerabilities }
@@ -87,16 +107,12 @@ pipeline {
                         error "❌ ${criticalVulns} vulnérabilités CRITICAL détectées"
                     }
 
-                    // 4. Publication du rapport
                     archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
 
-                    publishHTML([
-                        allowMissing: false,
-                        keepAll: true,
-                        reportDir: '.',
-                        reportFiles: 'trivy-report.html',
+                    publishHTML([reportDir: '.', reportFiles: 'trivy-report.html',
                         reportName: 'Rapport Trivy',
-                        reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)'
+                        reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)',
+                        keepAll: true, allowMissing: false
                     ])
                 }
             }
@@ -108,16 +124,14 @@ pipeline {
             sh 'docker system prune -f || true'
             script {
                 sh 'rm -f html.tpl trivy-report.* || true'
-
-                if (currentBuild.result == 'SUCCESS') {
-                    echo "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                } else {
-                    echo "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                }
+                echo currentBuild.result == 'SUCCESS'
+                        ? "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                        : "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             }
         }
     }
 }
+
 
 
 
