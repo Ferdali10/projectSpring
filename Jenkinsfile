@@ -8,7 +8,7 @@ pipeline {
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
         TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
-        SKIP_QUALITY_GATE = 'false' // ➕ change à 'true' si tu veux ignorer temporairement
+        SKIP_QUALITY_GATE = 'false' // mettre 'true' pour ignorer temporairement l'étape Quality Gate
     }
 
     stages {
@@ -50,19 +50,17 @@ pipeline {
         }
 
         stage('📊 Analyse SonarQube') {
-            environment {
-                SONARQUBE_SCANNER_PARAMS = "-Dsonar.projectKey=springfoyer"
-            }
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
-                    sh 'mvn sonar:sonar ${SONARQUBE_SCANNER_PARAMS}'
+                    // Attention aux guillemets doubles pour interpoler la variable
+                    sh "mvn sonar:sonar -Dsonar.projectKey=springfoyer"
                 }
             }
         }
 
         stage('🛂 Vérification Quality Gate') {
             when {
-                expression { return env.SKIP_QUALITY_GATE != 'true' }
+                expression { env.SKIP_QUALITY_GATE != 'true' }
             }
             steps {
                 timeout(time: 15, unit: 'MINUTES') {
@@ -76,12 +74,14 @@ pipeline {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
 
+                    // Télécharger le template HTML pour le rapport Trivy
                     sh """
                         curl -sLO ${env.TRIVY_TEMPLATE_URL}
                         mv advanced-html.tpl html.tpl
                         trivy image --download-db-only
                     """
 
+                    // Scanner l'image avec Trivy, générer json et html
                     sh """
                         trivy image --severity HIGH,CRITICAL \
                             --ignore-unfixed \
@@ -97,6 +97,7 @@ pipeline {
                             ${imageName}
                     """
 
+                    // Lire le rapport JSON et compter les vulnérabilités CRITICAL
                     def report = readJSON file: 'trivy-report.json'
                     def criticalVulns = report.Results
                         .findAll { it.Vulnerabilities }
@@ -109,10 +110,13 @@ pipeline {
 
                     archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
 
-                    publishHTML([reportDir: '.', reportFiles: 'trivy-report.html',
+                    publishHTML([
+                        reportDir: '.',
+                        reportFiles: 'trivy-report.html',
                         reportName: 'Rapport Trivy',
                         reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)',
-                        keepAll: true, allowMissing: false
+                        keepAll: true,
+                        allowMissing: false
                     ])
                 }
             }
@@ -125,17 +129,9 @@ pipeline {
             script {
                 sh 'rm -f html.tpl trivy-report.* || true'
                 echo currentBuild.result == 'SUCCESS'
-                        ? "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
-                        : "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                    ? "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                    : "❌ Pipeline échoué - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
             }
         }
     }
 }
-
-
-
-
-
-
-
-
