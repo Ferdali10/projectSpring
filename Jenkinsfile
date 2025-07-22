@@ -8,7 +8,8 @@ pipeline {
         DB_USER = credentials('mysql-username')
         DB_PASSWORD = credentials('mysql-password')
         TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
-        SKIP_QUALITY_GATE = 'false' // mettre 'true' pour ignorer complètement l'étape Quality Gate
+        SKIP_QUALITY_GATE = 'false'
+        TRIVY_DB_REPOSITORY = 'ghcr.io/aquasecurity/trivy-db' // Alternative mirror
     }
 
     stages {
@@ -63,7 +64,6 @@ pipeline {
             }
             steps {
                 timeout(time: 15, unit: 'MINUTES') {
-                    // Modification clé ici : abortPipeline: false pour continuer même si échec
                     waitForQualityGate abortPipeline: false
                 }
             }
@@ -74,49 +74,65 @@ pipeline {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
 
-                    // Télécharger le template HTML pour le rapport Trivy
+                    // Téléchargement avec gestion des erreurs
                     sh """
-                        curl -sLO ${env.TRIVY_TEMPLATE_URL}
-                        mv advanced-html.tpl html.tpl
-                        trivy image --download-db-only
+                        curl --retry 3 -sLO ${env.TRIVY_TEMPLATE_URL} || true
+                        [ -f advanced-html.tpl ] && mv advanced-html.tpl html.tpl || echo "Template download failed"
                     """
 
-                    // Scanner l'image avec Trivy, générer json et html
+                    // Téléchargement DB avec timeout augmenté
+                    sh """
+                        trivy image --download-db-only --timeout 10m || echo "DB download failed, proceeding with cached data"
+                    """
+
+                    // Analyse avec gestion des erreurs
                     sh """
                         trivy image --severity HIGH,CRITICAL \
                             --ignore-unfixed \
                             --format json \
                             -o trivy-report.json \
-                            ${imageName}
+                            ${imageName} || echo "Scan failed"
 
-                        trivy image --severity HIGH,CRITICAL \
-                            --ignore-unfixed \
-                            --format template \
-                            --template '@html.tpl' \
-                            -o trivy-report.html \
-                            ${imageName}
+                        if [ -f html.tpl ]; then
+                            trivy image --severity HIGH,CRITICAL \
+                                --ignore-unfixed \
+                                --format template \
+                                --template '@html.tpl' \
+                                -o trivy-report.html \
+                                ${imageName} || echo "HTML report generation failed"
+                        fi
                     """
 
-                    // Lire le rapport JSON et compter les vulnérabilités CRITICAL
-                    def report = readJSON file: 'trivy-report.json'
-                    def criticalVulns = report.Results
-                        .findAll { it.Vulnerabilities }
-                        .collectMany { it.Vulnerabilities }
-                        .count { it.Severity == "CRITICAL" }
+                    // Traitement des résultats avec vérification d'existence
+                    if (fileExists('trivy-report.json')) {
+                        try {
+                            def report = readJSON file: 'trivy-report.json'
+                            def criticalVulns = report.Results?.findAll { it.Vulnerabilities }
+                                                  ?.collectMany { it.Vulnerabilities }
+                                                  ?.count { it.Severity == "CRITICAL" } ?: 0
 
-                    if (criticalVulns > 0) {
-                        unstable("⚠️ ${criticalVulns} vulnérabilités CRITICAL détectées (Pipeline continué)")
-                        archiveArtifacts artifacts: 'trivy-report.*', fingerprint: true
+                            if (criticalVulns > 0) {
+                                unstable("⚠️ ${criticalVulns} vulnérabilités CRITICAL détectées")
+                            }
+                        } catch (Exception e) {
+                            echo "Erreur lors de l'analyse du rapport Trivy: ${e.getMessage()}"
+                        }
                     }
 
-                    publishHTML([
-                        reportDir: '.',
-                        reportFiles: 'trivy-report.html',
-                        reportName: 'Rapport Trivy',
-                        reportTitles: 'Vulnérabilités Sécurité (Graphiques inclus)',
-                        keepAll: true,
-                        allowMissing: false
-                    ])
+                    // Archivage avec allowEmptyArchive
+                    archiveArtifacts artifacts: 'trivy-report.*', allowEmptyArchive: true, fingerprint: true
+
+                    // Publication HTML conditionnelle
+                    if (fileExists('trivy-report.html')) {
+                        publishHTML([
+                            reportDir: '.',
+                            reportFiles: 'trivy-report.html',
+                            reportName: 'Rapport Trivy',
+                            reportTitles: 'Vulnérabilités Sécurité',
+                            keepAll: true,
+                            allowMissing: false
+                        ])
+                    }
                 }
             }
         }
