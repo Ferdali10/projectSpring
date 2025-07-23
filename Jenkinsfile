@@ -14,21 +14,13 @@ pipeline {
         TRIVY_DB_REPOSITORY = 'ghcr.io/aquasecurity/trivy-db'
         
         // Configuration SonarQube
-        SONAR_HOST = 'http://localhost:9000' // À adapter
+        SONAR_HOST = 'http://localhost:9000'
         SONAR_PROJECT_KEY = 'springfoyer'
+        SONAR_PROJECT_URL = "${SONAR_HOST}/projects" // Lien spécifique que vous avez fourni
         SKIP_QUALITY_GATE = 'false'
     }
 
     stages {
-        stage('🛠️ Préparation') {
-            steps {
-                script {
-                    echo "Initialisation du pipeline - Build #${env.BUILD_NUMBER}"
-                    sh 'git config --global http.sslVerify false' // Optionnel si problèmes SSL
-                }
-            }
-        }
-
         stage('📥 Clone du dépôt') {
             steps {
                 script {
@@ -56,9 +48,7 @@ pipeline {
                     }
                     
                     def jarPath = "target/springFoyer-0.0.2-SNAPSHOT.jar"
-                    if (!fileExists(jarPath)) {
-                        error "❌ Fichier JAR ${jarPath} introuvable"
-                    }
+                    fileExists(jarPath) || error("❌ Fichier JAR ${jarPath} introuvable")
                 }
             }
         }
@@ -97,7 +87,7 @@ pipeline {
                     timeout(time: 15, unit: 'MINUTES') {
                         def qg = waitForQualityGate abortPipeline: false
                         
-                        // Génération du rapport simplifié
+                        // Rapport HTML amélioré avec votre lien spécifique
                         def reportContent = """
                             <!DOCTYPE html>
                             <html>
@@ -107,18 +97,50 @@ pipeline {
                                     body { font-family: Arial, sans-serif; margin: 20px; }
                                     .passed { color: #4CAF50; font-weight: bold; }
                                     .failed { color: #F44336; font-weight: bold; }
-                                    .info { margin: 20px 0; padding: 15px; background: #f8f8f8; }
-                                    a { color: #2196F3; }
+                                    .info-box { 
+                                        margin: 20px 0; 
+                                        padding: 15px; 
+                                        background: #f5f5f5; 
+                                        border-radius: 5px;
+                                        border-left: 5px solid ${qg.status == 'OK' ? '#4CAF50' : '#F44336'};
+                                    }
+                                    a { 
+                                        color: #2196F3; 
+                                        text-decoration: none;
+                                    }
+                                    a:hover { text-decoration: underline; }
+                                    ul { padding-left: 20px; }
                                 </style>
                             </head>
                             <body>
                                 <h1>Rapport d'analyse qualité</h1>
-                                <div class="info">
+                                
+                                <div class="info-box">
+                                    <h2>Statut Quality Gate</h2>
                                     <p>Projet: <strong>${env.SONAR_PROJECT_KEY}</strong></p>
-                                    <p>Statut Quality Gate: <span class="${qg.status == 'OK' ? 'passed' : 'failed'}">${qg.status}</span></p>
-                                    <p>Lien vers le rapport complet: <a href="${env.SONAR_HOST}/dashboard?id=${env.SONAR_PROJECT_KEY}" target="_blank">Ouvrir dans SonarQube</a></p>
+                                    <p>Statut: <span class="${qg.status == 'OK' ? 'passed' : 'failed'}">${qg.status}</span></p>
                                 </div>
-                                ${qg.status != 'OK' ? '<h2>⚠️ Des problèmes de qualité ont été détectés</h2><p>Veuillez corriger les problèmes identifiés dans SonarQube</p>' : ''}
+                                
+                                <div class="info-box">
+                                    <h2>Accès aux rapports</h2>
+                                    <ul>
+                                        <li><a href="${env.SONAR_PROJECT_URL}" target="_blank">📊 Tous les projets SonarQube</a></li>
+                                        <li><a href="${env.SONAR_HOST}/dashboard?id=${env.SONAR_PROJECT_KEY}" target="_blank">🔍 Détails du projet</a></li>
+                                        <li><a href="${env.BUILD_URL}SonarQube_20Report" target="_blank">📝 Rapport Jenkins</a></li>
+                                    </ul>
+                                </div>
+                                
+                                ${qg.status != 'OK' ? '''
+                                <div class="info-box" style="border-left-color: #FF9800;">
+                                    <h2>⚠️ Actions recommandées</h2>
+                                    <ul>
+                                        <li>Corriger les vulnérabilités critiques en priorité</li>
+                                        <li>Réduire la dette technique</li>
+                                        <li>Améliorer la couverture de tests</li>
+                                        <li>Consulter le détail des problèmes dans SonarQube</li>
+                                    </ul>
+                                </div>
+                                ''' : ''}
                             </body>
                             </html>
                         """
@@ -132,14 +154,14 @@ pipeline {
                         ])
 
                         if (qg.status != 'OK') {
-                            unstable("Des problèmes de qualité ont été détectés")
+                            unstable("Problèmes de qualité détectés - Voir le rapport SonarQube")
                         }
                     }
                 }
             }
         }
 
-        stage('🔒 Analyse de sécurité (Trivy)') {
+        stage('🔒 Analyse Trivy') {
             steps {
                 script {
                     def imageName = "dalifer/springfoyer:latest"
@@ -150,7 +172,7 @@ pipeline {
                         [ -f advanced-html.tpl ] && mv advanced-html.tpl html.tpl || echo "ℹ️ Utilisation du cache local"
                     """
 
-                    // Mise à jour de la base de données Trivy
+                    // Mise à jour de la base de données
                     sh """
                         trivy image --download-db-only --timeout 10m || echo "⚠️ Échec mise à jour DB Trivy"
                     """
@@ -189,10 +211,9 @@ pipeline {
                         }
                     }
 
-                    // Archivage des rapports
+                    // Archivage et publication
                     archiveArtifacts artifacts: 'trivy-report.*', allowEmptyArchive: true
                     
-                    // Publication du rapport HTML
                     if (fileExists('trivy-report.html')) {
                         publishHTML([
                             reportDir: '.',
@@ -216,7 +237,7 @@ pipeline {
                 // Rapport final
                 def statusMessages = [
                     'SUCCESS': "✅ Pipeline terminé avec succès",
-                    'UNSTABLE': "⚠️ Pipeline terminé avec des avertissements",
+                    'UNSTABLE': "⚠️ Pipeline terminé avec des avertissements (Problèmes de qualité)",
                     'FAILURE': "❌ Pipeline en échec",
                     'ABORTED': "⏹ Pipeline interrompu"
                 ]
@@ -233,14 +254,22 @@ pipeline {
                             Le pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} a terminé avec le statut : ${currentBuild.result}
                             
                             Détails :
-                            - Rapport SonarQube : ${env.SONAR_HOST}/dashboard?id=${env.SONAR_PROJECT_KEY}
-                            - Console du build : ${env.BUILD_URL}console
+                            - Lien SonarQube: ${env.SONAR_PROJECT_URL}
+                            - Détail du projet: ${env.SONAR_HOST}/dashboard?id=${env.SONAR_PROJECT_KEY}
+                            - Console du build: ${env.BUILD_URL}console
+                            - Rapport Trivy: ${env.BUILD_URL}Trivy_20Report
+                            
+                            Actions recommandées:
+                            1. Consulter les rapports qualité
+                            2. Corriger les problèmes identifiés
+                            3. Relancer le pipeline après corrections
                             
                             Cordialement,
-                            Votre plateforme CI/CD
+                            Plateforme CI/CD
                         """,
                         to: 'equipe-dev@votre-domaine.com',
-                        attachLog: true
+                        attachLog: true,
+                        replyTo: 'no-reply@votre-domaine.com'
                     )
                 }
             }
