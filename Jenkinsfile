@@ -9,7 +9,9 @@ pipeline {
         DB_PASSWORD = credentials('mysql-password')
         TRIVY_TEMPLATE_URL = 'https://raw.githubusercontent.com/Ferdali10/projectSpring/master/advanced-html.tpl'
         SKIP_QUALITY_GATE = 'false'
-        TRIVY_DB_REPOSITORY = 'ghcr.io/aquasecurity/trivy-db' // Alternative mirror
+        TRIVY_DB_REPOSITORY = 'ghcr.io/aquasecurity/trivy-db'
+        SONAR_HOST = 'http://votre-sonar-server' // Remplacez par votre URL SonarQube
+        SONAR_PROJECT_KEY = 'springfoyer'
     }
 
     stages {
@@ -53,18 +55,31 @@ pipeline {
         stage('📊 Analyse SonarQube') {
             steps {
                 withSonarQubeEnv('SonarQubeServer') {
-                    sh "mvn sonar:sonar -Dsonar.projectKey=springfoyer"
+                    sh "mvn sonar:sonar -Dsonar.projectKey=${env.SONAR_PROJECT_KEY}"
                 }
             }
         }
 
-        stage('🛂 Vérification Quality Gate') {
+        stage('📝 Rapport Qualité SonarQube') {
             when {
                 expression { env.SKIP_QUALITY_GATE != 'true' }
             }
             steps {
-                timeout(time: 15, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: false
+                script {
+                    timeout(time: 15, unit: 'MINUTES') {
+                        def qg = waitForQualityGate abortPipeline: false
+                        
+                        // Appel à votre Shared Library
+                        generateSonarReport(
+                            projectKey: env.SONAR_PROJECT_KEY,
+                            sonarHost: env.SONAR_HOST,
+                            qualityGate: qg
+                        )
+                        
+                        if (qg.status != 'OK') {
+                            unstable("⚠️ Quality Gate échouée - Voir le rapport SonarQube")
+                        }
+                    }
                 }
             }
         }
@@ -142,10 +157,37 @@ pipeline {
         always {
             sh 'docker system prune -f || true'
             script {
-                sh 'rm -f html.tpl trivy-report.* || true'
-                echo currentBuild.result == 'SUCCESS' 
-                    ? "🎉 Pipeline réussi - ${env.JOB_NAME} #${env.BUILD_NUMBER}" 
-                    : "❌ Pipeline en état: ${currentBuild.result} - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                sh 'rm -f html.tpl trivy-report.* sonar-report-*.html || true'
+                
+                def statusMessages = [
+                    'SUCCESS': "🎉 Pipeline réussi",
+                    'UNSTABLE': "⚠️ Pipeline instable - Problèmes de qualité détectés",
+                    'FAILURE': "❌ Pipeline échoué",
+                    'ABORTED': "⏹ Pipeline annulé"
+                ]
+                
+                echo "${statusMessages.get(currentBuild.result, 'État inconnu')} - ${env.JOB_NAME} #${env.BUILD_NUMBER}"
+                
+                // Notification pour les builds instables
+                if (currentBuild.result == 'UNSTABLE') {
+                    emailext (
+                        subject: "[${currentBuild.result}] ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                            Bonjour,
+                            
+                            Le pipeline ${env.JOB_NAME} #${env.BUILD_NUMBER} a terminé avec des problèmes de qualité.
+                            
+                            Détails :
+                            - Rapport SonarQube: ${env.SONAR_HOST}/dashboard?id=${env.SONAR_PROJECT_KEY}
+                            - Rapport Pipeline: ${env.BUILD_URL}
+                            
+                            Cordialement,
+                            Votre système CI/CD
+                        """,
+                        to: 'equipe-dev@votre-domaine.com',
+                        attachLog: true
+                    )
+                }
             }
         }
     }
