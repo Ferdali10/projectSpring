@@ -25,6 +25,7 @@ services:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/springfoyer
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: 123
+      SERVER_PORT: 8081  # Ajout explicite
     networks:
       - backend
 
