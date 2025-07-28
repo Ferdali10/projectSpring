@@ -1,17 +1,3 @@
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Étape 1 : Build avec Maven + JDK 17
 FROM maven:3.8.6-eclipse-temurin-17 AS build
 
