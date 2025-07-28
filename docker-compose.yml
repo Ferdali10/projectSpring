@@ -1,33 +1,45 @@
 version: '3.8'
-
 services:
   mysql:
     image: mysql:8
-    container_name: mysql-db
-    restart: always
+    container_name: mysql-db-production
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: 123
+      MYSQL_ROOT_PASSWORD: Med200010*
       MYSQL_DATABASE: springfoyer
     ports:
-      - "3306:3306"
+      - "3307:3306"
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
 
   springfoyer:
-    build: .
-    container_name: springfoyer
-    restart: always
+    image: dalifer/springfoyer:latest
+    container_name: springfoyer-production
+    restart: unless-stopped
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     ports:
-      - "8082:8081"
+      - "8081:8081"  # ✅ CORRECTION ICI
     environment:
-      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db:3306/springfoyer
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db-production:3306/springfoyer
       SPRING_DATASOURCE_USERNAME: root
-      SPRING_DATASOURCE_PASSWORD: 123
-      SERVER_PORT: 8081  # Ajout explicite
+      SPRING_DATASOURCE_PASSWORD: Med200010*
+      SPRING_PROFILES_ACTIVE: production
     networks:
       - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
 networks:
   backend:
+    driver: bridge
