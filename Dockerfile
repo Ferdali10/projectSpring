@@ -50,7 +50,7 @@ RUN useradd -m springuser && chown springuser: /app
 USER springuser
 
 # Commande de démarrage
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-jar", "app.jar","--server.port=8081"]
 
 
 
