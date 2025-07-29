@@ -25,7 +25,7 @@ services:
       mysql:
         condition: service_healthy
     ports:
-      - "8081:8081"  # ✅ CORRECTION ICI
+      - "8081:8080"  # ✅ CORRECTION ICI
     environment:
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql-db-production:3306/springfoyer
       SPRING_DATASOURCE_USERNAME: root
