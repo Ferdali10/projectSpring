@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springfoyer-deployment
+  labels:
+    app: springfoyer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springfoyer
+  template:
+    metadata:
+      labels:
+        app: springfoyer
+    spec:
+      containers:
+        - name: springfoyer
+          image: <REGISTRY>/springfoyer:latest   # ton image construite/push
+          ports:
+            - containerPort: 8080
