@@ -1,3 +1,60 @@
+# ----- MySQL Secret & Deployment -----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mysql-secret
+type: Opaque
+stringData:
+  username: root
+  password: Med200010*
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+spec:
+  selector:
+    app: springfoyer-mysql
+  ports:
+    - port: 3306
+      targetPort: 3306
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springfoyer-mysql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springfoyer-mysql
+  template:
+    metadata:
+      labels:
+        app: springfoyer-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: password
+            - name: MYSQL_DATABASE
+              value: springfoyer
+          ports:
+            - containerPort: 3306
+          readinessProbe:
+            exec:
+              command: ["mysqladmin","ping","-h","localhost"]
+            initialDelaySeconds: 10
+            periodSeconds: 5
+
+# ----- Spring Boot Deployment & Service -----
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -16,12 +73,12 @@ spec:
     spec:
       containers:
         - name: springfoyer
-          image: dalifer/springfoyer:latest   # remplacé automatiquement par Jenkins
+          image: dalifer/springfoyer:latest
           ports:
             - containerPort: 8080
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:mysql://192.168.11.100:3306/springfoyer"
+              value: "jdbc:mysql://mysql-service:3306/springfoyer"
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -32,3 +89,16 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: springfoyer-service
+spec:
+  selector:
+    app: springfoyer
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+  type: NodePort
