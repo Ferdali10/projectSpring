@@ -10,8 +10,11 @@ spec:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /mnt/data/mysql   # crée ce dossier sur ta VM
+    path: /mnt/data/mysql   # crée ce dossier sur ta VM avant déploiement
+  persistentVolumeReclaimPolicy: Retain
+
 ---
+
 # ----- Secret MySQL -----
 apiVersion: v1
 kind: Secret
@@ -21,7 +24,9 @@ type: Opaque
 stringData:
   username: root
   password: Med200010*
+
 ---
+
 # ----- MySQL Service (headless pour StatefulSet) -----
 apiVersion: v1
 kind: Service
@@ -34,7 +39,9 @@ spec:
   ports:
     - port: 3306
       targetPort: 3306
+
 ---
+
 # ----- MySQL StatefulSet -----
 apiVersion: apps/v1
 kind: StatefulSet
@@ -71,11 +78,13 @@ spec:
     - metadata:
         name: mysql-persistent-storage
       spec:
-        accessModes: ["ReadWriteOnce"]
+        accessModes:
+          - ReadWriteOnce
         storageClassName: manual
         resources:
           requests:
             storage: 10Gi
+
 
 
 
