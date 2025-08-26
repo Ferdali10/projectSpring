@@ -13,6 +13,7 @@ spec:
     path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
 
 ---
+
 # ----- Secret MySQL -----
 apiVersion: v1
 kind: Secret
@@ -24,6 +25,7 @@ stringData:
   password: Med200010*
 
 ---
+
 # ----- Service MySQL (headless pour StatefulSet) -----
 apiVersion: v1
 kind: Service
@@ -38,6 +40,7 @@ spec:
       targetPort: 3306
 
 ---
+
 # ----- StatefulSet MySQL -----
 apiVersion: apps/v1
 kind: StatefulSet
@@ -79,6 +82,95 @@ spec:
         resources:
           requests:
             storage: 10Gi
+
+---
+
+# ----- Spring Boot Deployment -----
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: springfoyer-deployment
+  labels:
+    app: springfoyer
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: springfoyer
+  template:
+    metadata:
+      labels:
+        app: springfoyer
+    spec:
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for MySQL..."
+              until nc -z springfoyer-mysql 3306; do
+                echo "MySQL not ready yet..."
+                sleep 5
+              done
+              echo "MySQL is up!"
+      containers:
+        - name: springfoyer
+          image: dalifer/springfoyer:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:mysql://springfoyer-mysql:3306/springfoyer"
+            - name: SPRING_DATASOURCE_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: username
+            - name: SPRING_DATASOURCE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-secret
+                  key: password
+
+---
+
+# ----- Spring Boot Service -----
+apiVersion: v1
+kind: Service
+metadata:
+  name: springfoyer-service
+spec:
+  selector:
+    app: springfoyer
+  ports:
+    - port: 8080
+      targetPort: 8080
+  type: LoadBalancer
+
+---
+
+# ----- Horizontal Pod Autoscaler -----
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: springfoyer-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: springfoyer-deployment
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
 
 
 
