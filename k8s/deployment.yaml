@@ -1,4 +1,6 @@
-# ----- MySQL Secret & Deployment -----
+# ------------------------------------------
+# Secret MySQL
+# ------------------------------------------
 apiVersion: v1
 kind: Secret
 metadata:
@@ -8,6 +10,9 @@ stringData:
   username: root
   password: Med200010*
 ---
+# ------------------------------------------
+# Service MySQL
+# ------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -20,6 +25,9 @@ spec:
       targetPort: 3306
   type: ClusterIP
 ---
+# ------------------------------------------
+# Deployment MySQL
+# ------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -52,9 +60,10 @@ spec:
               command: ["mysqladmin","ping","-h","localhost"]
             initialDelaySeconds: 10
             periodSeconds: 5
-
-# ----- Spring Boot Deployment & Service -----
 ---
+# ------------------------------------------
+# Deployment Spring Boot
+# ------------------------------------------
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,6 +80,11 @@ spec:
       labels:
         app: springfoyer
     spec:
+      # Init container pour attendre MySQL
+      initContainers:
+        - name: wait-for-mysql
+          image: busybox:1.34
+          command: ['sh', '-c', 'until nc -z mysql-service 3306; do echo waiting for mysql; sleep 5; done']
       containers:
         - name: springfoyer
           image: dalifer/springfoyer:latest
@@ -90,6 +104,9 @@ spec:
                   name: mysql-secret
                   key: password
 ---
+# ------------------------------------------
+# Service Spring Boot
+# ------------------------------------------
 apiVersion: v1
 kind: Service
 metadata:
@@ -102,3 +119,4 @@ spec:
       targetPort: 8080
       nodePort: 30080
   type: NodePort
+
