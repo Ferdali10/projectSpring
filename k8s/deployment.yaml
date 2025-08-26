@@ -1,6 +1,4 @@
-# ------------------------------------------
-# Secret MySQL
-# ------------------------------------------
+# ----- MySQL Secret -----
 apiVersion: v1
 kind: Secret
 metadata:
@@ -9,10 +7,9 @@ type: Opaque
 stringData:
   username: root
   password: Med200010*
+
 ---
-# ------------------------------------------
-# Service MySQL
-# ------------------------------------------
+# ----- MySQL Service -----
 apiVersion: v1
 kind: Service
 metadata:
@@ -23,16 +20,16 @@ spec:
   ports:
     - port: 3306
       targetPort: 3306
-  type: ClusterIP
+  clusterIP: None   # pour StatefulSet, DNS stable
+
 ---
-# ------------------------------------------
-# Deployment MySQL
-# ------------------------------------------
+# ----- MySQL StatefulSet -----
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: springfoyer-mysql
 spec:
+  serviceName: "mysql-service"
   replicas: 1
   selector:
     matchLabels:
@@ -55,15 +52,20 @@ spec:
               value: springfoyer
           ports:
             - containerPort: 3306
-          readinessProbe:
-            exec:
-              command: ["mysqladmin","ping","-h","localhost"]
-            initialDelaySeconds: 10
-            periodSeconds: 5
+          volumeMounts:
+            - name: mysql-persistent-storage
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-persistent-storage
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+
 ---
-# ------------------------------------------
-# Deployment Spring Boot
-# ------------------------------------------
+# ----- Spring Boot Deployment -----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,7 +73,7 @@ metadata:
   labels:
     app: springfoyer
 spec:
-  replicas: 1
+  replicas: 3  # HA
   selector:
     matchLabels:
       app: springfoyer
@@ -80,11 +82,6 @@ spec:
       labels:
         app: springfoyer
     spec:
-      # Init container pour attendre MySQL
-      initContainers:
-        - name: wait-for-mysql
-          image: busybox:1.34
-          command: ['sh', '-c', 'until nc -z mysql-service 3306; do echo waiting for mysql; sleep 5; done']
       containers:
         - name: springfoyer
           image: dalifer/springfoyer:latest
@@ -92,7 +89,7 @@ spec:
             - containerPort: 8080
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:mysql://mysql-service:3306/springfoyer"
+              value: "jdbc:mysql://springfoyer-mysql:3306/springfoyer"
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -103,10 +100,9 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+
 ---
-# ------------------------------------------
-# Service Spring Boot
-# ------------------------------------------
+# ----- Spring Boot Service -----
 apiVersion: v1
 kind: Service
 metadata:
@@ -117,6 +113,27 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30080
-  type: NodePort
+  type: LoadBalancer  # accès public via cloud provider
+
+---
+# ----- Horizontal Pod Autoscaler -----
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: springfoyer-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: springfoyer-deployment
+  minReplicas: 2
+  maxReplicas: 5
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+
 
