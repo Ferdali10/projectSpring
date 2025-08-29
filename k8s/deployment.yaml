@@ -133,6 +133,20 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+            # Configuration Hibernate pour résoudre les erreurs de contraintes
+            - name: SPRING_JPA_HIBERNATE_DDL_AUTO
+              value: "update"
+            - name: SPRING_JPA_SHOW_SQL
+              value: "false"
+            - name: SPRING_JPA_GENERATE_DDL
+              value: "false"
+            - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
+              value: "org.hibernate.dialect.MySQLDialect"
+            # Configuration Actuator
+            - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
+              value: "health,info"
+            - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
+              value: "always"
 
 ---
 
