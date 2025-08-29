@@ -10,7 +10,7 @@ spec:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /mnt/data/mysql
+    path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
 
 ---
 
@@ -73,31 +73,6 @@ spec:
           volumeMounts:
             - name: mysql-persistent-storage
               mountPath: /var/lib/mysql
-          # Health check pour MySQL
-          readinessProbe:
-            exec:
-              command:
-                - mysqladmin
-                - ping
-                - -h
-                - localhost
-                - -uroot
-                - -p$MYSQL_ROOT_PASSWORD
-            initialDelaySeconds: 30
-            periodSeconds: 10
-            timeoutSeconds: 5
-          livenessProbe:
-            exec:
-              command:
-                - mysqladmin
-                - ping
-                - -h
-                - localhost
-                - -uroot
-                - -p$MYSQL_ROOT_PASSWORD
-            initialDelaySeconds: 60
-            periodSeconds: 20
-            timeoutSeconds: 5
   volumeClaimTemplates:
     - metadata:
         name: mysql-persistent-storage
@@ -134,18 +109,12 @@ spec:
             - sh
             - -c
             - |
-              echo "Waiting for MySQL to be ready..."
-              until nc -z springfoyer-mysql 3306 && mysqladmin ping -h springfoyer-mysql -uroot -p$MYSQL_ROOT_PASSWORD 2>/dev/null; do
+              echo "Waiting for MySQL..."
+              until nc -z springfoyer-mysql 3306; do
                 echo "MySQL not ready yet..."
                 sleep 5
               done
-              echo "MySQL is up and ready!"
-          env:
-            - name: MYSQL_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-secret
-                  key: password
+              echo "MySQL is up!"
       containers:
         - name: springfoyer
           image: dalifer/springfoyer:latest
@@ -153,7 +122,7 @@ spec:
             - containerPort: 8080
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:mysql://springfoyer-mysql:3306/springfoyer?createDatabaseIfNotExist=true"
+              value: "jdbc:mysql://springfoyer-mysql:3306/springfoyer"
             - name: SPRING_DATASOURCE_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -164,6 +133,7 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+            # Configuration Hibernate pour résoudre les erreurs de contraintes
             - name: SPRING_JPA_HIBERNATE_DDL_AUTO
               value: "update"
             - name: SPRING_JPA_SHOW_SQL
@@ -172,37 +142,11 @@ spec:
               value: "false"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQLDialect"
+            # Configuration Actuator
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
               value: "health,info"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
               value: "always"
-            - name: SPRING_PROFILES_ACTIVE
-              value: "prod"
-          # Configuration des health checks pour Spring Boot
-          readinessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8080
-            initialDelaySeconds: 60  # Délai augmenté pour le démarrage lent
-            periodSeconds: 15
-            timeoutSeconds: 10
-            failureThreshold: 3
-          livenessProbe:
-            httpGet:
-              path: /actuator/health
-              port: 8080
-            initialDelaySeconds: 90
-            periodSeconds: 30
-            timeoutSeconds: 10
-            failureThreshold: 3
-          # Resources pour accélérer le démarrage
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "1024Mi"
-              cpu: "500m"
 
 ---
 
@@ -217,7 +161,6 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-      nodePort: 30080  # Port fixe pour le LoadBalancer
   type: LoadBalancer
 
 ---
