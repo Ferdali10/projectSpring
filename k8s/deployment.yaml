@@ -147,7 +147,7 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-  type: LoadBalancer
+  type: ClusterIP   # ⚠️ on change en ClusterIP (Ingress gère l'exposition)
 
 ---
 
@@ -170,6 +170,31 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
+
+---
+
+# ----- Ingress (Azure Load Balancer + Ingress Controller) -----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: springfoyer-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: springfoyer.local   # tu peux mettre un domaine personnalisé
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: springfoyer-service
+                port:
+                  number: 8080
+  ingressClassName: nginx
+
 
 
 
