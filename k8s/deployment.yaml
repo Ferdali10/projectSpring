@@ -10,7 +10,7 @@ spec:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /mnt/data/mysql
+    path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
 
 ---
 
@@ -133,6 +133,7 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+            # Configuration Hibernate pour résoudre les erreurs de contraintes
             - name: SPRING_JPA_HIBERNATE_DDL_AUTO
               value: "update"
             - name: SPRING_JPA_SHOW_SQL
@@ -141,6 +142,7 @@ spec:
               value: "false"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQLDialect"
+            # Configuration Actuator
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
               value: "health,info"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
@@ -148,28 +150,18 @@ spec:
 
 ---
 
-# ----- Spring Boot Service avec Load Balancer Azure -----
+# ----- Spring Boot Service -----
 apiVersion: v1
 kind: Service
 metadata:
   name: springfoyer-service
-  annotations:
-    service.beta.kubernetes.io/azure-load-balancer-internal: "false"
-    service.beta.kubernetes.io/azure-load-balancer-ip: "172.201.153.226"
 spec:
   selector:
     app: springfoyer
   ports:
-    - name: http
-      port: 80
+    - port: 8080
       targetPort: 8080
-      protocol: TCP
-    - name: metrics
-      port: 8080
-      targetPort: 8080
-      protocol: TCP
   type: LoadBalancer
-  loadBalancerIP: 172.201.153.226
 
 ---
 
@@ -192,9 +184,6 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
-
----
-
 # ----- Ingress pour Accès Universel -----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -231,7 +220,7 @@ spec:
             port:
               number: 8080
   
-  # Règle pour accès interne Azure
+  # Règle pour accès interne Azure (optionnel)
   - host: springfoyer.internal
     http:
       paths:
@@ -242,3 +231,12 @@ spec:
             name: springfoyer-service
             port:
               number: 8080
+
+
+
+
+
+
+
+
+
