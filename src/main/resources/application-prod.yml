@@ -1,0 +1,35 @@
+# application-prod.yml - Ajoutez cette configuration à votre Spring Boot
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    web:
+      server:
+        request:
+          autotime:
+            enabled: true
+    jvm:
+      enabled: true
+    system:
+      enabled: true
+    tomcat:
+      enabled: true
+    hikaricp:
+      enabled: true
+
+# Logging pour debug
+logging:
+  level:
+    io.micrometer: INFO
+    org.springframework.boot.actuator: INFO
