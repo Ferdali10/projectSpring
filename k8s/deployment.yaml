@@ -184,6 +184,35 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
+# ----- Ingress pour SpringFoyer -----
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: springfoyer-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # nginx.ingress.kubernetes.io/ssl-redirect: "true"  # Après configuration SSL
+spec:
+  ingressClassName: nginx
+  rules:
+  # Configuration pour développement/local
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: springfoyer-service
+            port:
+              number: 8080
+      - path: /actuator
+        pathType: Prefix
+        backend:
+          service:
+            name: springfoyer-service
+            port:
+              number: 8080
 
 
 
