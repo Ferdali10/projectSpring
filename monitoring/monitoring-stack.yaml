@@ -205,8 +205,9 @@ spec:
     spec:
       serviceAccountName: prometheus
       securityContext:
-        runAsUser: 1000
-        fsGroup: 2000
+        runAsUser: 65534  # Corrigé: UID pour l'utilisateur nobody
+        runAsGroup: 65534 # Corrigé: GID pour l'utilisateur nobody
+        fsGroup: 65534    # Corrigé: GID pour le groupe de systèmes de fichiers
       containers:
         - name: prometheus
           image: prom/prometheus:v2.45.0
@@ -253,7 +254,9 @@ spec:
         app: grafana
     spec:
       securityContext:
-        fsGroup: 472
+        runAsUser: 472     # Ajouté: UID pour l'utilisateur Grafana
+        runAsGroup: 472    # Ajouté: GID pour l'utilisateur Grafana
+        fsGroup: 472       # Maintenu: GID pour le groupe de systèmes de fichiers
         supplementalGroups: [0]
       containers:
         - name: grafana
