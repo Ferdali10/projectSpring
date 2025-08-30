@@ -10,7 +10,7 @@ spec:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /mnt/data/mysql
+    path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
 
 ---
 
@@ -133,6 +133,7 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
+            # Configuration Hibernate pour résoudre les erreurs de contraintes
             - name: SPRING_JPA_HIBERNATE_DDL_AUTO
               value: "update"
             - name: SPRING_JPA_SHOW_SQL
@@ -141,16 +142,15 @@ spec:
               value: "false"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQLDialect"
+            # Configuration Actuator
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
-              value: "health,info,prometheus,metrics"
+              value: "health,info"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
               value: "always"
-            - name: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED
-              value: "true"
 
 ---
 
-# ----- Spring Boot Service (ClusterIP pour Ingress) -----
+# ----- Spring Boot Service -----
 apiVersion: v1
 kind: Service
 metadata:
@@ -161,7 +161,7 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-  type: ClusterIP  # ← Changé de LoadBalancer à ClusterIP
+  type: LoadBalancer
 
 ---
 
@@ -184,14 +184,12 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
-
----
-
-# ----- Ingress pour Accès Externe -----
+# ----- Ingress pour Accès Universel -----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: springfoyer-ingress
+  namespace: default
   annotations:
     nginx.ingress.kubernetes.io/rewrite-target: /
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
@@ -201,13 +199,10 @@ metadata:
     nginx.ingress.kubernetes.io/cors-allow-origin: "*"
     nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
     nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
-    # Configuration spécifique Azure
-    kubernetes.io/ingress.class: "nginx"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # Optionnel pour HTTPS
 spec:
   ingressClassName: nginx
   rules:
-  # Accès par IP direct (sans domaine)
+  # Règle pour accès par IP publique (externe)
   - http:
       paths:
       - path: /
@@ -225,22 +220,17 @@ spec:
             port:
               number: 8080
   
-  # Accès par hostname (optionnel - décommentez si vous avez un domaine)
-  # - host: springfoyer.yourdomain.com
-  #   http:
-  #     paths:
-  #     - path: /
-  #       pathType: Prefix
-  #       backend:
-  #         service:
-  #           name: springfoyer-service
-  #           port:
-  #             number: 8080
-
-  # tls:  # Décommentez pour HTTPS
-  # - hosts:
-  #   - springfoyer.yourdomain.com
-  #   secretName: springfoyer-tls
+  # Règle pour accès interne Azure (optionnel)
+  - host: springfoyer.internal
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: springfoyer-service
+            port:
+              number: 8080
 
 
 
