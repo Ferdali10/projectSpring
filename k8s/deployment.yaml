@@ -1,91 +1,4 @@
-# ----- PersistentVolume pour MySQL -----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: mysql-pv
-spec:
-  capacity:
-    storage: 10Gi
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: manual
-  hostPath:
-    path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
-
----
-
-# ----- Secret MySQL -----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: mysql-secret
-type: Opaque
-stringData:
-  username: root
-  password: Med200010*
-
----
-
-# ----- Service MySQL (headless pour StatefulSet) -----
-apiVersion: v1
-kind: Service
-metadata:
-  name: springfoyer-mysql
-spec:
-  clusterIP: None
-  selector:
-    app: springfoyer-mysql
-  ports:
-    - port: 3306
-      targetPort: 3306
-
----
-
-# ----- StatefulSet MySQL -----
-apiVersion: apps/v1
-kind: StatefulSet
-metadata:
-  name: springfoyer-mysql
-spec:
-  serviceName: "springfoyer-mysql"
-  replicas: 1
-  selector:
-    matchLabels:
-      app: springfoyer-mysql
-  template:
-    metadata:
-      labels:
-        app: springfoyer-mysql
-    spec:
-      containers:
-        - name: mysql
-          image: mysql:8.0
-          env:
-            - name: MYSQL_ROOT_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: mysql-secret
-                  key: password
-            - name: MYSQL_DATABASE
-              value: springfoyer
-          ports:
-            - containerPort: 3306
-          volumeMounts:
-            - name: mysql-persistent-storage
-              mountPath: /var/lib/mysql
-  volumeClaimTemplates:
-    - metadata:
-        name: mysql-persistent-storage
-      spec:
-        accessModes: ["ReadWriteOnce"]
-        storageClassName: manual
-        resources:
-          requests:
-            storage: 10Gi
-
----
-
-# ----- Spring Boot Deployment -----
+# ----- Spring Boot Deployment with Health Checks -----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -140,97 +53,53 @@ spec:
               value: "false"
             - name: SPRING_JPA_GENERATE_DDL
               value: "false"
-            - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
-              value: "org.hibernate.dialect.MySQLDialect"
+            # Remove explicit dialect configuration (causing warning)
+            # - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
+            #   value: "org.hibernate.dialect.MySQLDialect"
             # Configuration Actuator
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
               value: "health,info"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
               value: "always"
-
----
-
-# ----- Spring Boot Service -----
-apiVersion: v1
-kind: Service
-metadata:
-  name: springfoyer-service
-spec:
-  selector:
-    app: springfoyer
-  ports:
-    - port: 8080
-      targetPort: 8080
-  type: LoadBalancer
-
----
-
-# ----- Horizontal Pod Autoscaler -----
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: springfoyer-hpa
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: springfoyer-deployment
-  minReplicas: 2
-  maxReplicas: 5
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 60
-# ----- Ingress pour Accès Universel -----
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: springfoyer-ingress
-  namespace: default
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
-    nginx.ingress.kubernetes.io/ssl-redirect: "false"
-    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
-    nginx.ingress.kubernetes.io/enable-cors: "true"
-    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
-    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
-    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
-spec:
-  ingressClassName: nginx
-  rules:
-  # Règle pour accès par IP publique (externe)
-  - http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: springfoyer-service
-            port:
-              number: 8080
-      - path: /actuator
-        pathType: Prefix
-        backend:
-          service:
-            name: springfoyer-service
-            port:
-              number: 8080
-  
-  # Règle pour accès interne Azure (optionnel)
-  - host: springfoyer.internal
-    http:
-      paths:
-      - path: /
-        pathType: Prefix
-        backend:
-          service:
-            name: springfoyer-service
-            port:
-              number: 8080
+            # Add startup optimization
+            - name: SPRING_JPA_DEFER_DATASOURCE_INITIALIZATION
+              value: "true"
+            - name: SPRING_JPA_OPEN_IN_VIEW
+              value: "false"
+          # Add resource limits
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
+          # Add health checks
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 120  # Give app time to start
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 60   # Start checking after 1 minute
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Add startup probe for slow-starting apps
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12  # Allow up to 2 minutes for startup
 
 
 
