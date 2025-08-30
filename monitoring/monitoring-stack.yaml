@@ -17,12 +17,9 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
-    
     rule_files:
       - "alert_rules.yml"
-    
     scrape_configs:
-      # Kubernetes API Server
       - job_name: 'kubernetes-apiservers'
         kubernetes_sd_configs:
           - role: endpoints
@@ -34,8 +31,6 @@ data:
           - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
             action: keep
             regex: default;kubernetes;https
-      
-      # Kubernetes Nodes
       - job_name: 'kubernetes-nodes'
         kubernetes_sd_configs:
           - role: node
@@ -46,8 +41,6 @@ data:
         relabel_configs:
           - action: labelmap
             regex: __meta_kubernetes_node_label_(.+)
-      
-      # Spring Boot Actuator Metrics
       - job_name: 'springfoyer-app'
         kubernetes_sd_configs:
           - role: endpoints
@@ -60,8 +53,6 @@ data:
             regex: http
         metrics_path: '/actuator/prometheus'
         scrape_interval: 10s
-      
-      # MySQL Exporter (si installé)
       - job_name: 'mysql'
         static_configs:
           - targets: ['springfoyer-mysql:9104']
@@ -79,7 +70,6 @@ data:
             annotations:
               summary: "SpringFoyer application is down"
               description: "SpringFoyer application has been down for more than 1 minute"
-          
           - alert: HighCPUUsage
             expr: rate(process_cpu_usage[5m]) > 0.8
             for: 2m
@@ -88,7 +78,6 @@ data:
             annotations:
               summary: "High CPU usage detected"
               description: "CPU usage is above 80% for more than 2 minutes"
-          
           - alert: HighMemoryUsage
             expr: jvm_memory_used_bytes / jvm_memory_max_bytes > 0.9
             for: 2m
@@ -109,29 +98,20 @@ metadata:
 
 ---
 
-# ----- ClusterRole pour Prometheus -----
+# ----- ClusterRole et ClusterRoleBinding pour Prometheus -----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: prometheus
 rules:
   - apiGroups: [""]
-    resources:
-      - nodes
-      - nodes/proxy
-      - services
-      - endpoints
-      - pods
-    verbs: ["get", "list", "watch"]
-  - apiGroups:
-      - extensions
-    resources:
-      - ingresses
-    verbs: ["get", "list", "watch"]
+    resources: ["nodes", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get","list","watch"]
+  - apiGroups: ["extensions"]
+    resources: ["ingresses"]
+    verbs: ["get","list","watch"]
 
 ---
-
-# ----- ClusterRoleBinding pour Prometheus -----
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -147,7 +127,7 @@ subjects:
 
 ---
 
-# ----- PersistentVolume pour Prometheus -----
+# ----- PersistentVolumes et Claims -----
 apiVersion: v1
 kind: PersistentVolume
 metadata:
@@ -162,8 +142,6 @@ spec:
     path: /mnt/data/prometheus
 
 ---
-
-# ----- PersistentVolumeClaim pour Prometheus -----
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -176,6 +154,34 @@ spec:
   resources:
     requests:
       storage: 20Gi
+
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: grafana-pv
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  hostPath:
+    path: /mnt/data/grafana
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-pvc
+  namespace: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: manual
+  resources:
+    requests:
+      storage: 10Gi
 
 ---
 
@@ -198,6 +204,9 @@ spec:
         app: prometheus
     spec:
       serviceAccountName: prometheus
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 2000
       containers:
         - name: prometheus
           image: prom/prometheus:v2.45.0
@@ -211,13 +220,6 @@ spec:
             - '--web.enable-admin-api'
           ports:
             - containerPort: 9090
-          resources:
-            requests:
-              cpu: 200m
-              memory: 1000Mi
-            limits:
-              cpu: 1000m
-              memory: 2000Mi
           volumeMounts:
             - name: prometheus-config-volume
               mountPath: /etc/prometheus/
@@ -231,81 +233,6 @@ spec:
         - name: prometheus-storage-volume
           persistentVolumeClaim:
             claimName: prometheus-pvc
-
----
-
-# ----- Service Prometheus -----
-apiVersion: v1
-kind: Service
-metadata:
-  name: prometheus-service
-  namespace: monitoring
-spec:
-  selector:
-    app: prometheus
-  type: LoadBalancer
-  ports:
-    - port: 9090
-      targetPort: 9090
-      nodePort: 30090
-  type: NodePort
-
----
-
-# ----- PersistentVolume pour Grafana -----
-apiVersion: v1
-kind: PersistentVolume
-metadata:
-  name: grafana-pv
-spec:
-  capacity:
-    storage: 10Gi
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: manual
-  hostPath:
-    path: /mnt/data/grafana
-
----
-
-# ----- PersistentVolumeClaim pour Grafana -----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: grafana-pvc
-  namespace: monitoring
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: manual
-  resources:
-    requests:
-      storage: 10Gi
-
----
-
-# ----- ConfigMap pour Grafana -----
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: grafana-datasources
-  namespace: monitoring
-data:
-  prometheus.yaml: |-
-    {
-        "apiVersion": 1,
-        "datasources": [
-            {
-               "access":"proxy",
-                "editable": true,
-                "name": "prometheus",
-                "orgId": 1,
-                "type": "prometheus",
-                "url": "http://prometheus-service:9090",
-                "version": 1
-            }
-        ]
-    }
 
 ---
 
@@ -327,37 +254,20 @@ spec:
     spec:
       securityContext:
         fsGroup: 472
-        supplementalGroups:
-          - 0
+        supplementalGroups: [0]
       containers:
         - name: grafana
           image: grafana/grafana:10.1.0
           ports:
             - containerPort: 3000
-          resources:
-            limits:
-              memory: "1Gi"
-              cpu: "1000m"
-            requests:
-              memory: 500M
-              cpu: "500m"
           env:
             - name: GF_SECURITY_ADMIN_PASSWORD
               value: "admin123"
-            - name: GF_USERS_ALLOW_SIGN_UP
-              value: "false"
-            - name: GF_SERVER_DOMAIN
-              value: "grafana.local"
-            - name: GF_SMTP_ENABLED
-              value: "false"
-            - name: GF_INSTALL_PLUGINS
-              value: "grafana-piechart-panel"
           volumeMounts:
             - mountPath: /var/lib/grafana
               name: grafana-storage
             - mountPath: /etc/grafana/provisioning/datasources
               name: grafana-datasources
-              readOnly: false
       volumes:
         - name: grafana-storage
           persistentVolumeClaim:
@@ -369,7 +279,22 @@ spec:
 
 ---
 
-# ----- Service Grafana -----
+# ----- Services Prometheus & Grafana -----
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-service
+  namespace: monitoring
+spec:
+  selector:
+    app: prometheus
+  type: NodePort
+  ports:
+    - port: 9090
+      targetPort: 9090
+      nodePort: 30090
+
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -386,7 +311,7 @@ spec:
 
 ---
 
-# ----- Ingress pour Monitoring -----
+# ----- Ingress Monitoring -----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -418,3 +343,4 @@ spec:
                 name: grafana-service
                 port:
                   number: 3000
+
