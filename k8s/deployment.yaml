@@ -10,7 +10,7 @@ spec:
     - ReadWriteOnce
   storageClassName: manual
   hostPath:
-    path: /mnt/data/mysql   # Assure-toi que ce dossier existe sur ta VM
+    path: /mnt/data/mysql
 
 ---
 
@@ -73,6 +73,17 @@ spec:
           volumeMounts:
             - name: mysql-persistent-storage
               mountPath: /var/lib/mysql
+          # Ajout de readiness et liveness probes
+          readinessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 3306
+            initialDelaySeconds: 30
+            periodSeconds: 30
   volumeClaimTemplates:
     - metadata:
         name: mysql-persistent-storage
@@ -133,7 +144,7 @@ spec:
                 secretKeyRef:
                   name: mysql-secret
                   key: password
-            # Configuration Hibernate pour résoudre les erreurs de contraintes
+            # Configuration Hibernate
             - name: SPRING_JPA_HIBERNATE_DDL_AUTO
               value: "update"
             - name: SPRING_JPA_SHOW_SQL
@@ -142,15 +153,54 @@ spec:
               value: "false"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQLDialect"
-            # Configuration Actuator
+            # Configuration Actuator CORRIGÉE
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
-              value: "health,info"
+              value: "health,info,prometheus,metrics"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
               value: "always"
+            - name: MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED
+              value: "true"
+            - name: MANAGEMENT_HEALTH_READINESS_STATE_ENABLED
+              value: "true"
+            - name: MANAGEMENT_HEALTH_LIVENESS_STATE_ENABLED
+              value: "true"
+          # Ajout de probes de santé
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          # Ajout de startup probe pour gérer le long démarrage
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 12  # 2 minutes max
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "500m"
 
 ---
 
-# ----- Spring Boot Service -----
+# ----- Spring Boot Service (NodePort pour tests) -----
 apiVersion: v1
 kind: Service
 metadata:
@@ -161,7 +211,8 @@ spec:
   ports:
     - port: 8080
       targetPort: 8080
-  type: LoadBalancer
+      nodePort: 30080  # Port fixe pour les tests
+  type: NodePort
 
 ---
 
@@ -184,6 +235,9 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
+
+---
+
 # ----- Ingress pour Accès Universel -----
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -202,7 +256,6 @@ metadata:
 spec:
   ingressClassName: nginx
   rules:
-  # Règle pour accès par IP publique (externe)
   - http:
       paths:
       - path: /
@@ -219,8 +272,6 @@ spec:
             name: springfoyer-service
             port:
               number: 8080
-  
-  # Règle pour accès interne Azure (optionnel)
   - host: springfoyer.internal
     http:
       paths:
