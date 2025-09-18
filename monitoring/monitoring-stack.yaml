@@ -48,14 +48,16 @@ data:
           - source_labels: [__meta_kubernetes_service_name]
             action: keep
             regex: springfoyer-service
-          - source_labels: [__meta_kubernetes_endpoint_port_name]
-            action: keep
-            regex: http
         metrics_path: '/actuator/prometheus'
         scrape_interval: 10s
       - job_name: 'mysql'
-        static_configs:
-          - targets: ['springfoyer-mysql:9104']
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_name]
+            action: keep
+            regex: mysqld-exporter
+        metrics_path: '/metrics'
         scrape_interval: 30s
 
   alert_rules.yml: |
@@ -71,7 +73,7 @@ data:
               summary: "SpringFoyer application is down"
               description: "SpringFoyer application has been down for more than 1 minute"
           - alert: HighCPUUsage
-            expr: rate(process_cpu_usage[5m]) > 0.8
+            expr: rate(process_cpu_seconds_total[5m]) > 0.8
             for: 2m
             labels:
               severity: warning
@@ -191,8 +193,6 @@ kind: Deployment
 metadata:
   name: prometheus
   namespace: monitoring
-  labels:
-    app: prometheus
 spec:
   replicas: 1
   selector:
@@ -205,9 +205,9 @@ spec:
     spec:
       serviceAccountName: prometheus
       securityContext:
-        runAsUser: 65534  # Corrigé: UID pour l'utilisateur nobody
-        runAsGroup: 65534 # Corrigé: GID pour l'utilisateur nobody
-        fsGroup: 65534    # Corrigé: GID pour le groupe de systèmes de fichiers
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
       containers:
         - name: prometheus
           image: prom/prometheus:v2.45.0
@@ -254,10 +254,9 @@ spec:
         app: grafana
     spec:
       securityContext:
-        runAsUser: 472     # Ajouté: UID pour l'utilisateur Grafana
-        runAsGroup: 472    # Ajouté: GID pour l'utilisateur Grafana
-        fsGroup: 472       # Maintenu: GID pour le groupe de systèmes de fichiers
-        supplementalGroups: [0]
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
       containers:
         - name: grafana
           image: grafana/grafana:10.1.0
@@ -269,16 +268,10 @@ spec:
           volumeMounts:
             - mountPath: /var/lib/grafana
               name: grafana-storage
-            - mountPath: /etc/grafana/provisioning/datasources
-              name: grafana-datasources
       volumes:
         - name: grafana-storage
           persistentVolumeClaim:
             claimName: grafana-pvc
-        - name: grafana-datasources
-          configMap:
-            defaultMode: 420
-            name: grafana-datasources
 
 ---
 
@@ -346,4 +339,5 @@ spec:
                 name: grafana-service
                 port:
                   number: 3000
+
 
