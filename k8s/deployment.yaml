@@ -88,6 +88,33 @@ spec:
           volumeMounts:
             - name: mysql-persistent-storage
               mountPath: /var/lib/mysql
+          livenessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+                - -u
+                - root
+                - -p$(MYSQL_ROOT_PASSWORD)
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            exec:
+              command:
+                - mysql
+                - -h
+                - localhost
+                - -u
+                - root
+                - -p$(MYSQL_ROOT_PASSWORD)
+                - -e
+                - SELECT 1
+            initialDelaySeconds: 5
+            periodSeconds: 2
+            timeoutSeconds: 1
   volumeClaimTemplates:
     - metadata:
         name: mysql-persistent-storage
@@ -100,11 +127,13 @@ spec:
 
 ---
 
-# ----- MySQL Exporter pour Prometheus -----
+# ----- MySQL Exporter pour Prometheus avec configuration corrigée -----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
 spec:
   replicas: 1
   selector:
@@ -117,12 +146,37 @@ spec:
     spec:
       containers:
         - name: mysqld-exporter
-          image: prom/mysqld-exporter:latest
+          image: prom/mysqld-exporter:v0.15.0
           env:
             - name: DATA_SOURCE_NAME
-              value: root:Med200010*@tcp(springfoyer-mysql-access:3306)/
+              value: "root:Med200010*@tcp(springfoyer-mysql-access:3306)/"
+            - name: MYSQLD_EXPORTER_WEB_LISTEN_ADDRESS
+              value: ":9104"
+            - name: MYSQLD_EXPORTER_WEB_TELEMETRY_PATH
+              value: "/metrics"
           ports:
-            - containerPort: 9104
+            - name: metrics
+              containerPort: 9104
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /metrics
+              port: metrics
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          resources:
+            limits:
+              cpu: 100m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
 
 ---
 
@@ -131,17 +185,21 @@ apiVersion: v1
 kind: Service
 metadata:
   name: mysqld-exporter
+  labels:
+    app: mysqld-exporter
 spec:
   selector:
     app: mysqld-exporter
   ports:
-    - port: 9104
+    - name: metrics
+      port: 9104
       targetPort: 9104
+      protocol: TCP
   type: ClusterIP
 
 ---
 
-# ----- Spring Boot Deployment -----
+# ----- Spring Boot Deployment avec configuration Prometheus -----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -157,10 +215,14 @@ spec:
     metadata:
       labels:
         app: springfoyer
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/actuator/prometheus"
     spec:
       initContainers:
         - name: wait-for-mysql
-          image: busybox
+          image: busybox:1.35
           command:
             - sh
             - -c
@@ -175,7 +237,9 @@ spec:
         - name: springfoyer
           image: dalifer/springfoyer:latest
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
+              protocol: TCP
           env:
             - name: SPRING_DATASOURCE_URL
               value: "jdbc:mysql://springfoyer-mysql-access:3306/springfoyer"
@@ -197,10 +261,53 @@ spec:
               value: "false"
             - name: SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT
               value: "org.hibernate.dialect.MySQLDialect"
+            # Configuration Actuator pour monitoring
             - name: MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE
-              value: "health,info"
+              value: "health,info,prometheus,metrics"
             - name: MANAGEMENT_ENDPOINT_HEALTH_SHOW_DETAILS
               value: "always"
+            - name: MANAGEMENT_ENDPOINT_PROMETHEUS_ENABLED
+              value: "true"
+            - name: MANAGEMENT_METRICS_EXPORT_PROMETHEUS_ENABLED
+              value: "true"
+            - name: MANAGEMENT_SERVER_PORT
+              value: "8080"
+            - name: MANAGEMENT_ENDPOINTS_WEB_BASE_PATH
+              value: "/actuator"
+            # Configuration JVM pour métriques
+            - name: JAVA_OPTS
+              value: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -Dmanagement.security.enabled=false"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /actuator/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 1
+            failureThreshold: 30
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 500m
+              memory: 512Mi
 
 ---
 
@@ -209,13 +316,64 @@ apiVersion: v1
 kind: Service
 metadata:
   name: springfoyer-service
+  labels:
+    app: springfoyer
 spec:
   selector:
     app: springfoyer
   ports:
-    - port: 8080
+    - name: http
+      port: 8080
       targetPort: 8080
+      protocol: TCP
   type: LoadBalancer
+
+---
+
+# ----- ConfigMap pour configuration Grafana avec datasource Prometheus -----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus-service.monitoring.svc.cluster.local:9090
+        isDefault: true
+        editable: true
+
+---
+
+# ----- HorizontalPodAutoscaler pour Spring Boot -----
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: springfoyer-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: springfoyer-deployment
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
 
 
 
